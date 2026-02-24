@@ -1,0 +1,639 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Search, 
+  RefreshCw, 
+  Trash2, 
+  Plus, 
+  Users, 
+  Activity, 
+  Circle, 
+  Gamepad2, 
+  ExternalLink,
+  ShieldCheck,
+  LayoutDashboard,
+  Languages,
+  Clock
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import axios from 'axios';
+import { UserStatus, RobloxUser, RobloxPresence, RobloxThumbnail } from './types';
+
+const STORAGE_KEY = 'jiramet_check_users';
+const LANG_KEY = 'jiramet_check_lang';
+
+type Language = 'en' | 'th';
+
+const translations = {
+  en: {
+    title: 'Jiramet',
+    subtitle: 'Advanced Roblox Presence Monitor',
+    addPlaceholder: 'Add Username...',
+    filterPlaceholder: 'Filter dashboard users...',
+    totalAccounts: 'Total Accounts',
+    onlineNow: 'Online Now',
+    offline: 'Offline',
+    status: 'Status',
+    online: 'Online',
+    inGame: 'In-Game',
+    inStudio: 'In-Studio',
+    offlineText: 'Offline',
+    lastUpdated: 'Last updated',
+    offlineSince: 'Offline since',
+    profile: 'Profile',
+    noAccounts: 'No Accounts Tracked',
+    noAccountsDesc: 'Search for a Roblox username above to start monitoring their real-time presence.',
+    currentlyPlaying: 'Currently Playing',
+    unknownExperience: 'Unknown Experience',
+    systemOperational: 'System Operational',
+    showing: 'Showing',
+    of: 'of',
+    userNotFound: 'User not found on Roblox',
+    userAlreadyAdded: 'User already in dashboard',
+    searchError: 'Search Error',
+    fetchError: 'User added, but failed to fetch live status. Try refreshing.',
+    justNow: 'Just now',
+    minutesAgo: 'm ago',
+    hoursAgo: 'h ago',
+    daysAgo: 'd ago'
+  },
+  th: {
+    title: 'Jiramet',
+    subtitle: 'ระบบตรวจสอบสถานะ Roblox ขั้นสูง',
+    addPlaceholder: 'เพิ่มชื่อผู้ใช้...',
+    filterPlaceholder: 'กรองรายชื่อผู้ใช้...',
+    totalAccounts: 'บัญชีทั้งหมด',
+    onlineNow: 'ออนไลน์ขณะนี้',
+    offline: 'ออฟไลน์',
+    status: 'สถานะ',
+    online: 'ออนไลน์',
+    inGame: 'ในเกม',
+    inStudio: 'ในสตูดิโอ',
+    offlineText: 'ออฟไลน์',
+    lastUpdated: 'อัปเดตล่าสุด',
+    offlineSince: 'ออฟไลน์เมื่อ',
+    profile: 'โปรไฟล์',
+    noAccounts: 'ยังไม่มีการติดตามบัญชี',
+    noAccountsDesc: 'ค้นหาชื่อผู้ใช้ Roblox ด้านบนเพื่อเริ่มติดตามสถานะแบบเรียลไทม์',
+    currentlyPlaying: 'กำลังเล่น',
+    unknownExperience: 'ไม่ทราบชื่อแมพ',
+    systemOperational: 'ระบบทำงานปกติ',
+    showing: 'กำลังแสดง',
+    of: 'จาก',
+    userNotFound: 'ไม่พบผู้ใช้ใน Roblox',
+    userAlreadyAdded: 'ผู้ใช้นี้อยู่ในแดชบอร์ดแล้ว',
+    searchError: 'เกิดข้อผิดพลาดในการค้นหา',
+    fetchError: 'เพิ่มผู้ใช้แล้ว แต่ไม่สามารถดึงสถานะล่าสุดได้ กรุณาลองรีเฟรช',
+    justNow: 'เมื่อกี้',
+    minutesAgo: 'นาทีที่แล้ว',
+    hoursAgo: 'ชั่วโมงที่แล้ว',
+    daysAgo: 'วันที่แล้ว'
+  }
+};
+
+const formatRelativeTime = (dateStr: string | undefined, lang: Language) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (diffInSeconds < 60) return translations[lang].justNow;
+  
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) return `${diffInMinutes}${lang === 'en' ? translations[lang].minutesAgo : ' ' + translations[lang].minutesAgo}`;
+  
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `${diffInHours}${lang === 'en' ? translations[lang].hoursAgo : ' ' + translations[lang].hoursAgo}`;
+  
+  const diffInDays = Math.floor(diffInHours / 24);
+  return `${diffInDays}${lang === 'en' ? translations[lang].daysAgo : ' ' + translations[lang].daysAgo}`;
+};
+
+const UserCardSkeleton = () => (
+  <div className="w-full h-full space-y-4">
+    <div className="flex items-start justify-between mb-4">
+      <div className="flex items-center gap-4">
+        <div className="w-16 h-16 rounded-xl bg-zinc-800 border border-zinc-700/50 animate-pulse" />
+        <div className="space-y-2">
+          <div className="h-4 w-24 bg-zinc-800 rounded animate-pulse" />
+          <div className="h-3 w-16 bg-zinc-800/50 rounded animate-pulse" />
+        </div>
+      </div>
+    </div>
+    <div className="space-y-3">
+      <div className="h-10 w-full bg-zinc-800/30 rounded-xl border border-zinc-800/50 animate-pulse" />
+      <div className="h-8 w-full bg-zinc-800/40 rounded-xl animate-pulse" />
+    </div>
+  </div>
+);
+
+export default function App() {
+  const [username, setUsername] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
+  const [users, setUsers] = useState<UserStatus[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searchingUser, setSearchingUser] = useState<boolean>(false);
+  const [lang, setLang] = useState<Language>('en');
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [, setTick] = useState(0);
+
+  const t = translations[lang];
+
+  // Tick every minute to update relative times
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Load saved users and language from localStorage
+  useEffect(() => {
+    const savedLang = localStorage.getItem(LANG_KEY) as Language;
+    if (savedLang) setLang(savedLang);
+
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setUsers(parsed);
+        refreshAllStatus(parsed).finally(() => {
+          // Give a small delay for the smooth transition
+          setTimeout(() => setIsInitialLoading(false), 1500);
+        });
+      } catch (e) {
+        console.error("Failed to parse saved users", e);
+        setIsInitialLoading(false);
+      }
+    } else {
+      setIsInitialLoading(false);
+    }
+  }, []);
+
+  // Save language to localStorage
+  useEffect(() => {
+    localStorage.setItem(LANG_KEY, lang);
+  }, [lang]);
+
+  // Save users to localStorage whenever the list changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(users.map(u => ({
+      id: u.id,
+      name: u.name,
+      displayName: u.displayName,
+      hasVerifiedBadge: u.hasVerifiedBadge,
+      lastUpdated: u.lastUpdated
+    }))));
+  }, [users]);
+
+  const fetchPresenceAndThumbnails = async (userIds: number[]) => {
+    if (userIds.length === 0) return { presences: [], thumbnails: [] };
+    
+    try {
+      const [presenceRes, thumbRes] = await Promise.all([
+        axios.post('/api/roblox/presence', { userIds }),
+        axios.get(`/api/roblox/thumbnails?userIds=${userIds.join(',')}`)
+      ]);
+      
+      return {
+        presences: presenceRes.data.userPresences as RobloxPresence[],
+        thumbnails: thumbRes.data.data as RobloxThumbnail[]
+      };
+    } catch (err) {
+      console.error("Error fetching presence/thumbnails", err);
+      return { presences: [], thumbnails: [] };
+    }
+  };
+
+  const refreshAllStatus = async (currentUsers: UserStatus[]) => {
+    if (currentUsers.length === 0) return;
+    setRefreshing(true);
+    
+    const userIds = currentUsers.map(u => u.id);
+    const { presences, thumbnails } = await fetchPresenceAndThumbnails(userIds);
+    const now = new Date().toISOString();
+    
+    setUsers(prev => prev.map(user => {
+      const presence = presences.find(p => p.userId === user.id);
+      const thumb = thumbnails.find(t => t.targetId === user.id);
+      return {
+        ...user,
+        presence,
+        thumbnail: thumb?.imageUrl,
+        lastUpdated: now
+      };
+    }));
+    
+    setRefreshing(false);
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username.trim()) return;
+    
+    setLoading(true);
+    setSearchingUser(true);
+    setError(null);
+    
+    const name = username.trim();
+    
+    try {
+      const res = await axios.get(`/api/roblox/users/search?username=${name}`);
+      const foundUsers = res.data.data as RobloxUser[];
+      
+      if (foundUsers.length > 0) {
+        const userToAdd = foundUsers[0];
+        
+        // Check if already exists in current state
+        if (users.some(u => u.id === userToAdd.id)) {
+          setError(t.userAlreadyAdded);
+          return;
+        }
+
+        const now = new Date().toISOString();
+        try {
+          const { presences, thumbnails } = await fetchPresenceAndThumbnails([userToAdd.id]);
+          const newUser: UserStatus = {
+            ...userToAdd,
+            presence: presences[0],
+            thumbnail: thumbnails[0]?.imageUrl,
+            lastUpdated: now
+          };
+          setUsers(prev => [newUser, ...prev]);
+          setUsername('');
+        } catch (fetchErr: any) {
+          console.error("Presence/Thumbnail fetch failed", fetchErr);
+          // Add user anyway but without presence/thumbnail if it fails
+          const newUser: UserStatus = { ...userToAdd, lastUpdated: now };
+          setUsers(prev => [newUser, ...prev]);
+          setUsername('');
+          setError(t.fetchError);
+        }
+      } else {
+        setError(t.userNotFound);
+      }
+    } catch (err: any) {
+      console.error("Search failed", err);
+      const apiError = err.response?.data?.error || "Failed to connect to Roblox API";
+      setError(`${t.searchError}: ${apiError}`);
+    } finally {
+      setLoading(false);
+      setSearchingUser(false);
+    }
+  };
+
+  const removeUser = (id: number) => {
+    setUsers(prev => prev.filter(u => u.id !== id));
+  };
+
+  const getStatusColor = (type?: number) => {
+    switch (type) {
+      case 1: return 'text-green-500'; // Online
+      case 2: return 'text-blue-500';  // InGame
+      case 3: return 'text-orange-500'; // InStudio
+      default: return 'text-zinc-500'; // Offline
+    }
+  };
+
+  const getStatusGlow = (type?: number) => {
+    switch (type) {
+      case 1: return 'glow-green';
+      case 2: return 'glow-blue';
+      case 3: return 'shadow-[0_0_20px_rgba(249,115,22,0.2)]';
+      default: return '';
+    }
+  };
+
+  const getStatusText = (type?: number) => {
+    switch (type) {
+      case 1: return t.online;
+      case 2: return t.inGame;
+      case 3: return t.inStudio;
+      default: return t.offlineText;
+    }
+  };
+
+  const stats = {
+    total: users.length,
+    online: users.filter(u => u.presence?.userPresenceType && u.presence.userPresenceType > 0).length,
+    offline: users.filter(u => !u.presence?.userPresenceType || u.presence.userPresenceType === 0).length
+  };
+
+  const filteredUsers = users.filter(u => 
+    u.name.toLowerCase().includes(filterQuery.toLowerCase()) || 
+    u.displayName.toLowerCase().includes(filterQuery.toLowerCase())
+  );
+
+  return (
+    <div className="min-h-screen bg-[#050505] font-sans selection:bg-red-500/30">
+      <AnimatePresence>
+        {isInitialLoading && (
+          <motion.div
+            key="initial-loader"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8, ease: "easeInOut" }}
+            className="fixed inset-0 z-[100] bg-[#050505] flex flex-col items-center justify-center"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.5 }}
+              className="relative w-full h-full flex items-center justify-center p-12"
+            >
+              <img 
+                src="https://cdn.discordapp.com/attachments/1408452728388325511/1475859003270762609/BackgroundEraser_20260224_211304647.png?ex=699f044e&is=699db2ce&hm=a1ce927d6348022cf51198dbae609dcb034f5e6d56b111543515894a892016e2&" 
+                alt="Loading..."
+                className="w-full max-w-lg h-auto object-contain opacity-100"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-[#050505] pointer-events-none" />
+            </motion.div>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+              className="mt-8 text-center"
+            >
+              <h2 className="text-2xl font-bold tracking-tighter uppercase text-white mb-2">
+                Jiramet<span className="text-red-600">Check</span>
+              </h2>
+              <div className="flex items-center gap-2 text-zinc-500 text-xs font-mono uppercase tracking-[0.3em]">
+                <span className="w-1 h-1 bg-red-600 rounded-full animate-ping" />
+                Initializing System
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Background Effects */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-red-900/10 blur-[120px] rounded-full" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-red-900/10 blur-[120px] rounded-full" />
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-[0.03]" />
+      </div>
+
+      <div className="relative z-10 max-w-6xl mx-auto px-6 py-12">
+        {/* Header */}
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-12">
+          <div>
+            <motion.div 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="flex items-center gap-3 mb-2"
+            >
+              <div className="p-2 bg-red-600/10 rounded-lg border border-red-600/20">
+                <LayoutDashboard className="w-6 h-6 text-red-500" />
+              </div>
+              <h1 className="text-3xl font-bold tracking-tighter uppercase">
+                {t.title}<span className="text-red-600">Check</span>
+              </h1>
+            </motion.div>
+            <p className="text-zinc-500 text-sm font-mono uppercase tracking-widest">
+              {t.subtitle} // v1.0.0
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setLang(lang === 'en' ? 'th' : 'en')}
+              className="p-2.5 glass rounded-xl hover:border-red-600/30 transition-all flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-zinc-400 hover:text-red-500"
+            >
+              <Languages className="w-4 h-4" />
+              {lang === 'en' ? 'TH' : 'EN'}
+            </button>
+
+            <form onSubmit={handleSearch} className="relative group">
+              <input 
+                type="text" 
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={t.addPlaceholder}
+                className="w-full md:w-64 bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-2.5 pl-10 focus:outline-none focus:border-red-600/50 transition-all placeholder:text-zinc-600 text-sm"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-red-500 transition-colors" />
+              <button 
+                type="submit"
+                disabled={loading}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              </button>
+            </form>
+
+            <button 
+              onClick={() => refreshAllStatus(users)}
+              disabled={refreshing}
+              className="p-2.5 glass rounded-xl hover:border-red-600/30 transition-all group"
+            >
+              <RefreshCw className={`w-5 h-5 text-zinc-400 group-hover:text-red-500 transition-colors ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </header>
+
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 p-4 bg-red-600/10 border border-red-600/20 rounded-xl text-red-500 text-sm flex items-center gap-2"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            {error}
+          </motion.div>
+        )}
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {[
+            { label: t.totalAccounts, value: stats.total, icon: Users, color: 'text-zinc-400' },
+            { label: t.onlineNow, value: stats.online, icon: Activity, color: 'text-green-500' },
+            { label: t.offline, value: stats.offline, icon: Circle, color: 'text-zinc-600' }
+          ].map((stat, i) => (
+            <motion.div 
+              key={stat.label}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.1 }}
+              className="glass p-6 rounded-2xl flex items-center justify-between group hover:border-red-600/20 transition-all"
+            >
+              <div>
+                <p className="text-zinc-500 text-xs font-mono uppercase tracking-wider mb-1">{stat.label}</p>
+                <h3 className="text-3xl font-bold tracking-tight">{stat.value}</h3>
+              </div>
+              <stat.icon className={`w-8 h-8 ${stat.color} opacity-20 group-hover:opacity-100 transition-all`} />
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Dashboard Filter */}
+        {users.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-8 flex items-center justify-between gap-4"
+          >
+            <div className="relative flex-1 max-w-md group">
+              <input 
+                type="text" 
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+                placeholder={t.filterPlaceholder}
+                className="w-full bg-zinc-900/30 border border-zinc-800/50 rounded-xl px-4 py-2 pl-10 focus:outline-none focus:border-red-600/30 transition-all placeholder:text-zinc-700 text-sm"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-700 group-focus-within:text-red-500 transition-colors" />
+            </div>
+            <div className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest hidden sm:block">
+              {t.showing} {filteredUsers.length} {t.of} {users.length}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Users Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <AnimatePresence mode="popLayout">
+            {searchingUser && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="glass p-5 rounded-2xl relative overflow-hidden shimmer border-red-600/20"
+              >
+                <div className="absolute top-0 left-0 w-full h-1 bg-red-600/50" />
+                <UserCardSkeleton />
+              </motion.div>
+            )}
+            {filteredUsers.map((user) => (
+              <motion.div
+                key={user.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className={`glass p-5 rounded-2xl relative overflow-hidden group transition-all duration-500 ${refreshing ? 'shimmer' : getStatusGlow(user.presence?.userPresenceType)} hover:border-red-600/40`}
+              >
+                {refreshing ? (
+                  <>
+                    <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800" />
+                    <UserCardSkeleton />
+                  </>
+                ) : (
+                  <>
+                    {/* Status Indicator Bar */}
+                    <div className={`absolute top-0 left-0 w-full h-1 ${getStatusColor(user.presence?.userPresenceType).replace('text-', 'bg-')}`} />
+                    
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-4">
+                        <div className="relative">
+                          <img 
+                            src={user.thumbnail || `https://www.roblox.com/headshot-thumbnail/image?userId=${user.id}&width=150&height=150&format=png`} 
+                            alt={user.name}
+                            className="w-16 h-16 rounded-xl object-cover bg-zinc-900 border border-zinc-800"
+                          />
+                          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#050505] ${getStatusColor(user.presence?.userPresenceType).replace('text-', 'bg-')}`} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1">
+                            <h4 className="font-bold text-lg leading-none">{user.displayName}</h4>
+                            {user.hasVerifiedBadge && <ShieldCheck className="w-4 h-4 text-blue-500" />}
+                          </div>
+                          <p className="text-zinc-500 text-sm font-mono">@{user.name}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => removeUser(user.id)}
+                        className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 bg-zinc-900/40 rounded-xl border border-zinc-800/50">
+                        <div className="flex items-center gap-2">
+                          <Circle className={`w-2 h-2 fill-current ${getStatusColor(user.presence?.userPresenceType)}`} />
+                          <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">{t.status}</span>
+                        </div>
+                        <span className={`text-xs font-bold uppercase ${getStatusColor(user.presence?.userPresenceType)}`}>
+                          {getStatusText(user.presence?.userPresenceType)}
+                        </span>
+                      </div>
+
+                      {user.presence?.userPresenceType === 2 && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-3 bg-blue-600/10 border border-blue-600/20 rounded-xl"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <Gamepad2 className="w-3.5 h-3.5 text-blue-500" />
+                            <span className="text-[10px] font-mono uppercase tracking-widest text-blue-400">{t.currentlyPlaying}</span>
+                          </div>
+                          <p className="text-sm font-medium text-blue-100 line-clamp-1">
+                            {user.presence.lastLocation || t.unknownExperience}
+                          </p>
+                        </motion.div>
+                      )}
+
+                      {(!user.presence?.userPresenceType || user.presence.userPresenceType === 0) && user.presence?.lastOnline && (
+                        <div className="flex items-center gap-2 px-1 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                          <Clock className="w-3 h-3" />
+                          {t.offlineSince} {formatRelativeTime(user.presence.lastOnline, lang)}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-2">
+                        <a 
+                          href={`https://www.roblox.com/users/${user.id}/profile`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-2 py-2 bg-zinc-800/50 hover:bg-zinc-800 rounded-xl text-xs font-medium transition-colors"
+                        >
+                          {t.profile} <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest text-center">
+                          {t.lastUpdated}: {user.lastUpdated ? new Date(user.lastUpdated).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+          
+          {users.length === 0 && (
+            <div className="col-span-full py-20 text-center">
+              <div className="inline-block p-4 bg-zinc-900/50 rounded-full mb-4">
+                <Users className="w-12 h-12 text-zinc-700" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">{t.noAccounts}</h3>
+              <p className="text-zinc-500 max-w-xs mx-auto">
+                {t.noAccountsDesc}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="relative z-10 py-12 border-t border-zinc-900 mt-20">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
+          <p className="text-zinc-600 text-xs font-mono">
+            &copy; 2024 JIRAMETCHECK. NOT AFFILIATED WITH ROBLOX CORPORATION.
+          </p>
+          <div className="flex items-center gap-6">
+            <span className="flex items-center gap-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              {t.systemOperational}
+            </span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
