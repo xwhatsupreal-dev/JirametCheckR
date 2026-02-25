@@ -1,12 +1,68 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
+import { WebSocketServer, WebSocket } from "ws";
+import { createServer } from "http";
 
 async function startServer() {
   const app = express();
+  const server = createServer(app);
+  const wss = new WebSocketServer({ server });
   const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
+
+  // Shared state: list of tracked users
+  let trackedUsers: any[] = [];
+
+  // API to add/remove users for global sync
+  app.post("/api/users/sync/add", (req, res) => {
+    const { user } = req.body;
+    if (!user) return res.status(400).json({ error: "User is required" });
+    
+    // Check if already exists
+    if (!trackedUsers.find(u => u.id === user.id)) {
+      trackedUsers.push(user);
+      broadcast({ type: "USER_ADDED", user });
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/users/sync/remove", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "UserId is required" });
+    
+    trackedUsers = trackedUsers.filter(u => u.id !== userId);
+    broadcast({ type: "USER_REMOVED", userId });
+    res.json({ success: true });
+  });
+
+  app.post("/api/users/sync/update", (req, res) => {
+    const { user } = req.body;
+    if (!user) return res.status(400).json({ error: "User is required" });
+    
+    trackedUsers = trackedUsers.map(u => u.id === user.id ? user : u);
+    broadcast({ type: "USER_UPDATED", user });
+    res.json({ success: true });
+  });
+
+  // WebSocket logic
+  wss.on("connection", (ws) => {
+    console.log("[WS] New client connected");
+    
+    // Send initial state
+    ws.send(JSON.stringify({ type: "SYNC_USERS", users: trackedUsers }));
+
+    ws.on("close", () => console.log("[WS] Client disconnected"));
+  });
+
+  const broadcast = (data: any) => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
+      }
+    });
+  };
 
   // Roblox API Proxy Routes
   
@@ -110,7 +166,7 @@ async function startServer() {
     app.use(express.static("dist"));
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

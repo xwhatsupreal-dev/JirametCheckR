@@ -141,6 +141,7 @@ export default function App() {
   const [searchingUser, setSearchingUser] = useState<boolean>(false);
   const [lang, setLang] = useState<Language>('en');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [, setTick] = useState(0);
 
   const t = translations[lang];
@@ -151,44 +152,51 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Load saved users and language from localStorage
+  // WebSocket Sync
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      switch (data.type) {
+        case 'SYNC_USERS':
+          setUsers(data.users);
+          if (isInitialLoading) {
+            refreshAllStatus(data.users).finally(() => {
+              setTimeout(() => setIsInitialLoading(false), 1500);
+            });
+          }
+          break;
+        case 'USER_ADDED':
+          setUsers(prev => {
+            if (prev.find(u => u.id === data.user.id)) return prev;
+            return [...prev, data.user];
+          });
+          break;
+        case 'USER_REMOVED':
+          setUsers(prev => prev.filter(u => u.id !== data.userId));
+          break;
+        case 'USER_UPDATED':
+          setUsers(prev => prev.map(u => u.id === data.user.id ? data.user : u));
+          break;
+      }
+    };
+
+    return () => socket.close();
+  }, [isInitialLoading]);
+
+  // Load saved language from localStorage
   useEffect(() => {
     const savedLang = localStorage.getItem(LANG_KEY) as Language;
     if (savedLang) setLang(savedLang);
-
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setUsers(parsed);
-        refreshAllStatus(parsed).finally(() => {
-          // Give a small delay for the smooth transition
-          setTimeout(() => setIsInitialLoading(false), 1500);
-        });
-      } catch (e) {
-        console.error("Failed to parse saved users", e);
-        setIsInitialLoading(false);
-      }
-    } else {
-      setIsInitialLoading(false);
-    }
   }, []);
 
   // Save language to localStorage
   useEffect(() => {
     localStorage.setItem(LANG_KEY, lang);
   }, [lang]);
-
-  // Save users to localStorage whenever the list changes
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users.map(u => ({
-      id: u.id,
-      name: u.name,
-      displayName: u.displayName,
-      hasVerifiedBadge: u.hasVerifiedBadge,
-      lastUpdated: u.lastUpdated
-    }))));
-  }, [users]);
 
   const fetchPresenceAndThumbnails = async (userIds: number[]) => {
     if (userIds.length === 0) return { presences: [], thumbnails: [] };
@@ -220,12 +228,17 @@ export default function App() {
     setUsers(prev => prev.map(user => {
       const presence = presences.find(p => p.userId === user.id);
       const thumb = thumbnails.find(t => t.targetId === user.id);
-      return {
+      const updatedUser = {
         ...user,
         presence,
         thumbnail: thumb?.imageUrl,
         lastUpdated: now
       };
+      
+      // Sync update to server
+      axios.post('/api/users/sync/update', { user: updatedUser });
+      
+      return updatedUser;
     }));
     
     setRefreshing(false);
@@ -263,13 +276,19 @@ export default function App() {
             thumbnail: thumbnails[0]?.imageUrl,
             lastUpdated: now
           };
-          setUsers(prev => [newUser, ...prev]);
+          
+          // Sync to server
+          await axios.post('/api/users/sync/add', { user: newUser });
+          
           setUsername('');
         } catch (fetchErr: any) {
           console.error("Presence/Thumbnail fetch failed", fetchErr);
           // Add user anyway but without presence/thumbnail if it fails
           const newUser: UserStatus = { ...userToAdd, lastUpdated: now };
-          setUsers(prev => [newUser, ...prev]);
+          
+          // Sync to server
+          await axios.post('/api/users/sync/add', { user: newUser });
+          
           setUsername('');
           setError(t.fetchError);
         }
@@ -286,8 +305,13 @@ export default function App() {
     }
   };
 
-  const removeUser = (id: number) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
+  const removeUser = async (id: number) => {
+    try {
+      await axios.post('/api/users/sync/remove', { userId: id });
+      setDeleteConfirmId(null);
+    } catch (err) {
+      console.error("Failed to remove user", err);
+    }
   };
 
   const getStatusColor = (type?: number) => {
@@ -548,7 +572,7 @@ export default function App() {
                         </div>
                       </div>
                       <button 
-                        onClick={() => removeUser(user.id)}
+                        onClick={() => setDeleteConfirmId(user.id)}
                         className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -622,6 +646,49 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirmId !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl max-w-sm w-full shadow-2xl"
+            >
+              <div className="flex items-center gap-3 mb-4 text-red-500">
+                <div className="p-2 bg-red-500/10 rounded-lg">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold uppercase tracking-tight">Confirm Delete</h3>
+              </div>
+              <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+                Are you sure you want to remove this user from the monitor? This action will be visible to everyone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirmId(null)}
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold uppercase tracking-widest rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => removeUser(deleteConfirmId)}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-widest rounded-xl transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Footer */}
       <footer className="relative z-10 py-12 border-t border-zinc-900 mt-20">
