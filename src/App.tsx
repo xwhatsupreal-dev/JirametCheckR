@@ -278,8 +278,8 @@ export default function App() {
       }
     } catch (err: any) {
       console.error("Search failed", err);
-      const apiError = err.response?.data?.error || "Failed to connect to Roblox API";
-      setError(`${t.searchError}: ${apiError}`);
+      const apiError = err.response?.data?.error || err.message || "Failed to connect to Roblox API";
+      setError(`${t.searchError}: ${typeof apiError === 'object' ? JSON.stringify(apiError) : apiError}`);
     } finally {
       setLoading(false);
       setSearchingUser(false);
@@ -362,7 +362,10 @@ export default function App() {
               <h2 className="text-2xl font-bold tracking-tighter uppercase text-white mb-2">
                 Jiramet<span className="text-red-600">Check</span>
               </h2>
-              <div className="flex items-center gap-2 text-zinc-500 text-xs font-mono uppercase tracking-[0.3em]">
+              <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.2em] mb-4">
+                Created by _.texraxit
+              </p>
+              <div className="flex items-center justify-center gap-2 text-zinc-500 text-xs font-mono uppercase tracking-[0.3em]">
                 <span className="w-1 h-1 bg-red-600 rounded-full animate-ping" />
                 Initializing System
               </div>
@@ -623,9 +626,14 @@ export default function App() {
       {/* Footer */}
       <footer className="relative z-10 py-12 border-t border-zinc-900 mt-20">
         <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-zinc-600 text-xs font-mono">
-            &copy; 2024 JIRAMETCHECK. NOT AFFILIATED WITH ROBLOX CORPORATION.
-          </p>
+          <div className="flex flex-col gap-1">
+            <p className="text-zinc-600 text-xs font-mono">
+              &copy; 2024 JIRAMETCHECK. NOT AFFILIATED WITH ROBLOX CORPORATION.
+            </p>
+            <p className="text-red-600/50 text-[10px] font-mono uppercase tracking-widest">
+              Developed by _.texraxit
+            </p>
+          </div>
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
