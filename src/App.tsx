@@ -59,7 +59,14 @@ const translations = {
     justNow: 'Just now',
     minutesAgo: 'm ago',
     hoursAgo: 'h ago',
-    daysAgo: 'd ago'
+    daysAgo: 'd ago',
+    recentActivity: 'Recent Activity',
+    live: 'Live',
+    joined: 'joined',
+    left: 'left',
+    startedPlaying: 'started playing',
+    wentOffline: 'went offline',
+    wentOnline: 'went online'
   },
   th: {
     title: 'Jiramet',
@@ -91,7 +98,14 @@ const translations = {
     justNow: 'เมื่อกี้',
     minutesAgo: 'นาทีที่แล้ว',
     hoursAgo: 'ชั่วโมงที่แล้ว',
-    daysAgo: 'วันที่แล้ว'
+    daysAgo: 'วันที่แล้ว',
+    recentActivity: 'กิจกรรมล่าสุด',
+    live: 'สด',
+    joined: 'เข้าร่วม',
+    left: 'ออกจาก',
+    startedPlaying: 'เริ่มเล่น',
+    wentOffline: 'ออฟไลน์',
+    wentOnline: 'ออนไลน์'
   }
 };
 
@@ -142,6 +156,8 @@ export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [gameNames, setGameNames] = useState<Record<number, string>>({});
   const [, setTick] = useState(0);
 
   const t = translations[lang];
@@ -161,8 +177,9 @@ export default function App() {
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
       switch (data.type) {
-        case 'SYNC_USERS':
+        case 'SYNC_DATA':
           setUsers(data.users);
+          setHistory(data.history);
           if (isInitialLoading) {
             refreshAllStatus(data.users).finally(() => {
               setTimeout(() => setIsInitialLoading(false), 1500);
@@ -180,6 +197,9 @@ export default function App() {
           break;
         case 'USER_UPDATED':
           setUsers(prev => prev.map(u => u.id === data.user.id ? data.user : u));
+          break;
+        case 'HISTORY_UPDATED':
+          setHistory(data.history);
           break;
       }
     };
@@ -224,22 +244,80 @@ export default function App() {
     const userIds = currentUsers.map(u => u.id);
     const { presences, thumbnails } = await fetchPresenceAndThumbnails(userIds);
     const now = new Date().toISOString();
+
+    // Fetch game names if needed
+    const placeIdsToFetch = presences
+      .filter(p => p.userPresenceType === 2 && p.placeId && !gameNames[p.placeId])
+      .map(p => p.placeId as number);
+
+    const currentNames = { ...gameNames };
+    if (placeIdsToFetch.length > 0) {
+      try {
+        const res = await axios.get(`/api/roblox/games/details?placeIds=${placeIdsToFetch.join(',')}`);
+        res.data.forEach((game: any) => {
+          currentNames[game.placeId] = game.name;
+        });
+        setGameNames(prev => ({ ...prev, ...currentNames }));
+      } catch (err) {
+        console.error("Failed to fetch game names", err);
+      }
+    }
     
-    setUsers(prev => prev.map(user => {
-      const presence = presences.find(p => p.userId === user.id);
-      const thumb = thumbnails.find(t => t.targetId === user.id);
-      const updatedUser = {
-        ...user,
-        presence,
-        thumbnail: thumb?.imageUrl,
-        lastUpdated: now
-      };
-      
-      // Sync update to server
-      axios.post('/api/users/sync/update', { user: updatedUser });
-      
-      return updatedUser;
-    }));
+    setUsers(prev => {
+      const updated = prev.map(user => {
+        const presence = presences.find(p => p.userId === user.id);
+        const thumb = thumbnails.find(t => t.targetId === user.id);
+        
+        // Activity Logging Logic
+        if (presence) {
+          const oldPresence = user.presence;
+          let logMessage = '';
+          let logType = 'STATUS';
+
+          if (oldPresence) {
+            // Offline -> Online
+            if (oldPresence.userPresenceType === 0 && presence.userPresenceType === 1) {
+              logMessage = `${user.displayName} ${t.wentOnline}`;
+            }
+            // Online/InGame -> Offline
+            else if (oldPresence.userPresenceType !== 0 && presence.userPresenceType === 0) {
+              logMessage = `${user.displayName} ${t.wentOffline}`;
+            }
+            // Joined Game
+            else if (oldPresence.userPresenceType !== 2 && presence.userPresenceType === 2) {
+              const gameName = currentNames[presence.placeId as number] || t.unknownExperience;
+              logMessage = `${user.displayName} ${t.startedPlaying} ${gameName}`;
+              logType = 'GAME';
+            }
+          }
+
+          if (logMessage) {
+            axios.post('/api/users/sync/log', {
+              log: {
+                type: logType,
+                message: logMessage,
+                timestamp: now,
+                userId: user.id,
+                thumbnail: thumb?.imageUrl
+              }
+            });
+          }
+        }
+
+        const updatedUser = {
+          ...user,
+          presence,
+          thumbnail: thumb?.imageUrl,
+          lastUpdated: now
+        };
+        
+        // Sync update to server
+        axios.post('/api/users/sync/update', { user: updatedUser });
+        
+        return updatedUser;
+      });
+      return updated;
+    });
     
     setRefreshing(false);
   };
@@ -520,6 +598,81 @@ export default function App() {
           </motion.div>
         )}
 
+        {/* Activity History */}
+        <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-6 mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-600/10 rounded-xl">
+                <Activity className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white tracking-tight">{t.recentActivity}</h3>
+                <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest mt-0.5">Real-time presence updates</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20">
+              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+              <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">{t.live}</span>
+            </div>
+          </div>
+
+          <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+            <AnimatePresence mode="popLayout">
+              {history.map((log) => (
+                <motion.div
+                  key={log.id}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="group flex items-center gap-4 p-3 bg-zinc-900/40 border border-zinc-800/30 rounded-2xl hover:border-zinc-700/50 transition-all"
+                >
+                  <div className="relative flex-shrink-0">
+                    {log.thumbnail ? (
+                      <img 
+                        src={log.thumbnail} 
+                        alt="" 
+                        className="w-10 h-10 rounded-xl object-cover border border-zinc-800"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center">
+                        <Activity className="w-5 h-5 text-zinc-600" />
+                      </div>
+                    )}
+                    {log.type === 'GAME' && (
+                      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-zinc-900 flex items-center justify-center">
+                        <Gamepad2 className="w-2 h-2 text-white" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-zinc-300 font-medium truncate leading-tight">
+                      {log.message}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Clock className="w-3 h-3 text-zinc-600" />
+                      <span className="text-[10px] text-zinc-600 font-mono uppercase">
+                        {formatRelativeTime(log.timestamp, lang)}
+                      </span>
+                    </div>
+                  </div>
+                  {log.type === 'GAME' && (
+                    <div className="px-2 py-1 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                      <span className="text-[10px] font-bold text-blue-500 uppercase tracking-tighter">New</span>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            {history.length === 0 && (
+              <div className="py-12 text-center">
+                <Activity className="w-8 h-8 text-zinc-800 mx-auto mb-3 opacity-20" />
+                <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest">No activity yet</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Users Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <AnimatePresence mode="popLayout">
@@ -601,7 +754,7 @@ export default function App() {
                             <span className="text-[10px] font-mono uppercase tracking-widest text-blue-400">{t.currentlyPlaying}</span>
                           </div>
                           <p className="text-sm font-medium text-blue-100 line-clamp-1">
-                            {user.presence.lastLocation || t.unknownExperience}
+                            {gameNames[user.presence.placeId as number] || user.presence.lastLocation || t.unknownExperience}
                           </p>
                         </motion.div>
                       )}
