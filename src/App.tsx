@@ -22,9 +22,17 @@ import {
   Edit2,
   Check,
   X,
-  RotateCcw
+  RotateCcw,
+  History,
+  ChevronRight
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { 
+  motion, 
+  AnimatePresence, 
+  useMotionValue, 
+  useTransform, 
+  useSpring 
+} from 'motion/react';
 import axios from 'axios';
 import { UserStatus, RobloxUser, RobloxPresence, RobloxThumbnail, RobloxPlaceDetails, RobloxUniverseDetails } from './types';
 
@@ -74,7 +82,50 @@ const translations = {
     reset: 'Reset',
     enterGameRef: 'Enter Game URL or Place ID',
     save: 'Save',
-    cancel: 'Cancel'
+    cancel: 'Cancel',
+    updateLog: 'Update Log',
+    updates: [
+      {
+        title: 'v1.5.0 - Visual Overhaul',
+        items: [
+          'Added 3D Tilt effect to user cards',
+          'Enhanced glassmorphism with better blur and saturation',
+          'Added interactive shine effect on hover'
+        ]
+      },
+      {
+        title: 'v1.4.0 - Rich Game Cards',
+        items: [
+          'Added automatic game icon fetching',
+          'Added creator information to game details',
+          'Improved game card layout with thumbnails'
+        ]
+      },
+      {
+        title: 'v1.3.0 - Reliability Fixes',
+        items: [
+          'Fixed Roblox API 401/404 errors',
+          'Implemented multi-step fallback for game details',
+          'Added Universe ID support for better name fetching'
+        ]
+      },
+      {
+        title: 'v1.2.0 - Customization',
+        items: [
+          'Added Custom Game Link/ID support',
+          'Added automatic name fetching for custom games',
+          'Added quick reset for custom game settings'
+        ]
+      },
+      {
+        title: 'v1.1.0 - Smart Features',
+        items: [
+          'Added smart sorting (In-Game users first)',
+          'Added detailed "Last Seen" information',
+          'Added Universe ID and Root Place ID details'
+        ]
+      }
+    ]
   },
   th: {
     title: 'Jiramet',
@@ -116,7 +167,50 @@ const translations = {
     reset: 'รีเซ็ต',
     enterGameRef: 'ใส่ลิงก์เกมหรือไอดีแมพ',
     save: 'บันทึก',
-    cancel: 'ยกเลิก'
+    cancel: 'ยกเลิก',
+    updateLog: 'บันทึกการอัปเดต',
+    updates: [
+      {
+        title: 'v1.5.0 - Visual Overhaul',
+        items: [
+          'เพิ่มเอฟเฟกต์เอียง 3 มิติ (3D Tilt) ให้กับบัตรผู้เล่น',
+          'ปรับปรุงความใสของกระจก (Glassmorphism) ให้สวยขึ้น',
+          'เพิ่มเอฟเฟกต์แสงสะท้อนเวลาเอาเมาส์ไปชี้'
+        ]
+      },
+      {
+        title: 'v1.4.0 - Rich Game Cards',
+        items: [
+          'เพิ่มการดึงรูปไอคอนเกมอัตโนมัติ',
+          'เพิ่มข้อมูลผู้สร้างเกมในรายละเอียด',
+          'ปรับปรุงหน้าตาการ์ดเกมให้มีรูปประกอบ'
+        ]
+      },
+      {
+        title: 'v1.3.0 - Reliability Fixes',
+        items: [
+          'แก้ไขปัญหา Roblox API 401/404',
+          'เพิ่มระบบดึงข้อมูลสำรอง (Fallback) เมื่อ API มีปัญหา',
+          'รองรับ Universe ID เพื่อการดึงชื่อเกมที่แม่นยำขึ้น'
+        ]
+      },
+      {
+        title: 'v1.2.0 - Customization',
+        items: [
+          'เพิ่มช่องใส่ลิงก์/ไอดีเกมกำหนดเอง',
+          'ดึงชื่อเกมจากลิงก์ที่ใส่ให้อัตโนมัติ',
+          'เพิ่มปุ่มรีเซ็ตการตั้งค่าเกมกำหนดเอง'
+        ]
+      },
+      {
+        title: 'v1.1.0 - Smart Features',
+        items: [
+          'เพิ่มการจัดเรียงลำดับ (คนที่เล่นเกมอยู่จะขึ้นก่อน)',
+          'เพิ่มข้อมูล "เห็นล่าสุด" ที่ละเอียดขึ้น',
+          'แสดงข้อมูล Universe ID และ Root Place ID'
+        ]
+      }
+    ]
   }
 };
 
@@ -159,6 +253,67 @@ const GameIcon = ({ src, className, fallbackIcon: Fallback = Gamepad2 }: { src?:
   );
 };
 
+const TiltCard = ({ children, className, glowClass }: { children: React.ReactNode, className?: string, glowClass?: string, key?: any }) => {
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+
+  const mouseXSpring = useSpring(x);
+  const mouseYSpring = useSpring(y);
+
+  const rotateX = useTransform(mouseYSpring, [-0.5, 0.5], ["10deg", "-10deg"]);
+  const rotateY = useTransform(mouseXSpring, [-0.5, 0.5], ["-10deg", "10deg"]);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const xPct = mouseX / width - 0.5;
+    const yPct = mouseY / height - 0.5;
+
+    x.set(xPct);
+    y.set(yPct);
+  };
+
+  const handleMouseLeave = () => {
+    x.set(0);
+    y.set(0);
+  };
+
+  return (
+    <motion.div
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        rotateY,
+        rotateX,
+        transformStyle: "preserve-3d",
+      }}
+      className={`relative ${className} ${glowClass}`}
+    >
+      <div
+        style={{
+          transform: "translateZ(50px)",
+          transformStyle: "preserve-3d",
+        }}
+      >
+        {children}
+      </div>
+      {/* Shine effect */}
+      <motion.div
+        style={{
+          background: "radial-gradient(circle at center, rgba(255,255,255,0.1) 0%, transparent 80%)",
+          left: useTransform(mouseXSpring, [-0.5, 0.5], ["-20%", "20%"]),
+          top: useTransform(mouseYSpring, [-0.5, 0.5], ["-20%", "20%"]),
+        }}
+        className="absolute inset-0 pointer-events-none z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+      />
+    </motion.div>
+  );
+};
+
 const UserCardSkeleton = () => (
   <div className="w-full h-full space-y-4">
     <div className="flex items-start justify-between mb-4">
@@ -188,6 +343,7 @@ export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [showUpdateLog, setShowUpdateLog] = useState(false);
   const [editingCustomGame, setEditingCustomGame] = useState<number | null>(null);
   const [customGameInput, setCustomGameInput] = useState('');
   const [, setTick] = useState(0);
@@ -652,6 +808,14 @@ export default function App() {
 
           <div className="flex items-center gap-4">
             <button 
+              onClick={() => setShowUpdateLog(true)}
+              className="p-2.5 glass rounded-xl hover:border-red-600/30 transition-all flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-zinc-400 hover:text-red-500"
+              title={t.updateLog}
+            >
+              <History className="w-4 h-4" />
+            </button>
+
+            <button 
               onClick={() => setLang(lang === 'en' ? 'th' : 'en')}
               className="p-2.5 glass rounded-xl hover:border-red-600/30 transition-all flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-zinc-400 hover:text-red-500"
             >
@@ -759,15 +923,19 @@ export default function App() {
               </motion.div>
             )}
             {filteredUsers.map((user) => (
-              <motion.div
+              <TiltCard
                 key={user.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className={`glass p-5 rounded-2xl relative overflow-hidden group transition-all duration-500 ${refreshing ? 'shimmer' : getStatusGlow(user.presence?.userPresenceType)} hover:border-red-600/40`}
+                glowClass={getStatusGlow(user.presence?.userPresenceType)}
+                className="group"
               >
-                {refreshing ? (
+                <motion.div
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className={`glass p-5 rounded-2xl relative overflow-hidden transition-all duration-500 ${refreshing ? 'shimmer' : ''} hover:border-red-600/40`}
+                >
+                  {refreshing ? (
                   <>
                     <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800" />
                     <UserCardSkeleton />
@@ -777,9 +945,9 @@ export default function App() {
                     {/* Status Indicator Bar */}
                     <div className={`absolute top-0 left-0 w-full h-1 ${getStatusColor(user.presence?.userPresenceType).replace('text-', 'bg-')}`} />
                     
-                    <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-start justify-between mb-4" style={{ transform: "translateZ(20px)" }}>
                       <div className="flex items-center gap-4">
-                        <div className="relative">
+                        <div className="relative" style={{ transform: "translateZ(30px)" }}>
                           <img 
                             src={user.thumbnail || `https://www.roblox.com/headshot-thumbnail/image?userId=${user.id}&width=150&height=150&format=png`} 
                             alt={user.name}
@@ -787,7 +955,7 @@ export default function App() {
                           />
                           <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#050505] ${getStatusColor(user.presence?.userPresenceType).replace('text-', 'bg-')}`} />
                         </div>
-                        <div>
+                        <div style={{ transform: "translateZ(25px)" }}>
                           <div className="flex items-center gap-1">
                             <h4 className="font-bold text-lg leading-none">{user.displayName}</h4>
                             {user.hasVerifiedBadge && <ShieldCheck className="w-4 h-4 text-blue-500" />}
@@ -798,12 +966,13 @@ export default function App() {
                       <button 
                         onClick={() => setDeleteConfirmId(user.id)}
                         className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                        style={{ transform: "translateZ(40px)" }}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 
-                    <div className="space-y-3">
+                    <div className="space-y-3" style={{ transform: "translateZ(10px)" }}>
                       <div className="flex items-center justify-between p-3 bg-zinc-900/40 rounded-xl border border-zinc-800/50">
                         <div className="flex items-center gap-2">
                           <Circle className={`w-2 h-2 fill-current ${getStatusColor(user.presence?.userPresenceType)}`} />
@@ -977,7 +1146,8 @@ export default function App() {
                   </>
                 )}
               </motion.div>
-            ))}
+            </TiltCard>
+          ))}
           </AnimatePresence>
           
           {users.length === 0 && (
@@ -1034,6 +1204,67 @@ export default function App() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Update Log Modal */}
+      <AnimatePresence>
+        {showUpdateLog && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowUpdateLog(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-lg glass rounded-3xl overflow-hidden shadow-2xl border-red-600/20"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-600/10 rounded-lg border border-red-600/20">
+                    <History className="w-5 h-5 text-red-500" />
+                  </div>
+                  <h3 className="text-xl font-bold uppercase tracking-tighter">{t.updateLog}</h3>
+                </div>
+                <button 
+                  onClick={() => setShowUpdateLog(false)}
+                  className="p-2 text-zinc-500 hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar space-y-8">
+                {t.updates.map((update, idx) => (
+                  <div key={idx} className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 bg-red-600 rounded-full" />
+                      <h4 className="text-sm font-bold text-zinc-200 uppercase tracking-wider">{update.title}</h4>
+                    </div>
+                    <ul className="space-y-2 pl-3.5 border-l border-zinc-800 ml-0.5">
+                      {update.items.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-zinc-500 leading-relaxed">
+                          <ChevronRight className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-600/50" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 bg-zinc-900/50 border-t border-zinc-800 text-center">
+                <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.2em]">
+                  Current Version: v1.5.0
+                </p>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
