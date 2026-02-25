@@ -22,8 +22,34 @@ export interface RobloxThumbnail {
   imageUrl: string;
 }
 
+export interface RobloxPlaceDetails {
+  placeId: number;
+  name: string;
+  description: string;
+  url: string;
+  builder: string;
+  builderId: number;
+}
+
+export interface RobloxUniverseDetails {
+  id: number;
+  name: string;
+  description: string;
+  creator: {
+    id: number;
+    name: string;
+    type: string;
+  };
+  rootPlaceId: number;
+}
+
 export interface UserStatus extends RobloxUser {
   presence?: RobloxPresence;
   thumbnail?: string;
+  placeDetails?: RobloxPlaceDetails;
+  universeDetails?: RobloxUniverseDetails;
+  universeIcon?: string;
+  customGameRef?: string;
+  customPlaceDetails?: RobloxPlaceDetails;
   lastUpdated?: string;
 }

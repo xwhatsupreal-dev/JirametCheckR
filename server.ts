@@ -12,9 +12,8 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Shared state: list of tracked users and activity history
+  // Shared state: list of tracked users
   let trackedUsers: any[] = [];
-  let activityHistory: any[] = [];
 
   // API to add/remove users for global sync
   app.post("/api/users/sync/add", (req, res) => {
@@ -25,17 +24,6 @@ async function startServer() {
     if (!trackedUsers.find(u => u.id === user.id)) {
       trackedUsers.push(user);
       broadcast({ type: "USER_ADDED", user });
-      
-      // Log activity
-      const log = {
-        id: Date.now() + Math.random(),
-        type: 'SYSTEM',
-        message: `Added ${user.displayName} to monitor`,
-        timestamp: new Date().toISOString()
-      };
-      activityHistory.unshift(log);
-      if (activityHistory.length > 50) activityHistory.pop();
-      broadcast({ type: "HISTORY_UPDATED", history: activityHistory });
     }
     res.json({ success: true });
   });
@@ -44,32 +32,8 @@ async function startServer() {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ error: "UserId is required" });
     
-    const user = trackedUsers.find(u => u.id === userId);
     trackedUsers = trackedUsers.filter(u => u.id !== userId);
     broadcast({ type: "USER_REMOVED", userId });
-
-    if (user) {
-      const log = {
-        id: Date.now() + Math.random(),
-        type: 'SYSTEM',
-        message: `Removed ${user.displayName} from monitor`,
-        timestamp: new Date().toISOString()
-      };
-      activityHistory.unshift(log);
-      if (activityHistory.length > 50) activityHistory.pop();
-      broadcast({ type: "HISTORY_UPDATED", history: activityHistory });
-    }
-    res.json({ success: true });
-  });
-
-  app.post("/api/users/sync/log", (req, res) => {
-    const { log } = req.body;
-    if (!log) return res.status(400).json({ error: "Log is required" });
-    
-    const newLog = { ...log, id: Date.now() + Math.random() };
-    activityHistory.unshift(newLog);
-    if (activityHistory.length > 50) activityHistory.pop();
-    broadcast({ type: "HISTORY_UPDATED", history: activityHistory });
     res.json({ success: true });
   });
 
@@ -87,7 +51,7 @@ async function startServer() {
     console.log("[WS] New client connected");
     
     // Send initial state
-    ws.send(JSON.stringify({ type: "SYNC_DATA", users: trackedUsers, history: activityHistory }));
+    ws.send(JSON.stringify({ type: "SYNC_USERS", users: trackedUsers }));
 
     ws.on("close", () => console.log("[WS] Client disconnected"));
   });
@@ -101,26 +65,6 @@ async function startServer() {
   };
 
   // Roblox API Proxy Routes
-
-  // Get game details
-  app.get("/api/roblox/games/details", async (req, res) => {
-    const { placeIds } = req.query;
-    if (!placeIds) return res.status(400).json({ error: "placeIds are required" });
-
-    try {
-      const response = await axios.get(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeIds}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      });
-      res.json(response.data);
-    } catch (error: any) {
-      console.error("Roblox Game Details Error:", error.response?.data || error.message);
-      res.status(error.response?.status || 500).json({ 
-        error: error.response?.data?.errors?.[0]?.message || error.message 
-      });
-    }
-  });
   
   // Search user by username (using exact match endpoint for better reliability)
   app.get("/api/roblox/users/search", async (req, res) => {
@@ -205,6 +149,93 @@ async function startServer() {
       res.json(response.data);
     } catch (error: any) {
       console.error("Roblox Thumbnail Error:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.errors?.[0]?.message || error.message 
+      });
+    }
+  });
+
+  // Get place details for game info - Improved reliability with fallback
+  app.get("/api/roblox/places/details", async (req, res) => {
+    const { placeIds } = req.query;
+    if (!placeIds) return res.status(400).json({ error: "placeIds are required" });
+
+    try {
+      // Step 1: Try to get universe IDs for these places first
+      // This is a very reliable public endpoint
+      const universeRes = await axios.get(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeIds}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        validateStatus: () => true // Don't throw on 401, we'll handle it
+      });
+
+      if (universeRes.status === 200 && Array.isArray(universeRes.data)) {
+        const mappedData = universeRes.data.map((item: any) => ({
+          placeId: item.placeId,
+          name: item.name,
+          description: item.description,
+          url: `https://www.roblox.com/games/${item.placeId}`,
+          builder: item.builder,
+          builderId: item.builderId
+        }));
+        return res.json(mappedData);
+      }
+
+      // Step 2: Fallback if multiget fails (e.g. 401)
+      // We'll return a minimal object so the UI doesn't crash, 
+      // the App will then try to fetch via universeId if available
+      const ids = String(placeIds).split(',');
+      const fallbackData = ids.map(id => ({
+        placeId: Number(id),
+        name: `Place #${id}`,
+        description: "",
+        url: `https://www.roblox.com/games/${id}`,
+        builder: "Unknown",
+        builderId: 0
+      }));
+      
+      res.json(fallbackData);
+    } catch (error: any) {
+      console.error("Roblox Place Details Error:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.errors?.[0]?.message || error.message 
+      });
+    }
+  });
+
+  // Get game icons (Thumbnails)
+  app.get("/api/roblox/games/icons", async (req, res) => {
+    const { universeIds } = req.query;
+    if (!universeIds) return res.status(400).json({ error: "universeIds are required" });
+
+    try {
+      const response = await axios.get(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds}&returnPolicy=PlaceHolder&size=150x150&format=Png&isCircular=false`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      res.json(response.data);
+    } catch (error: any) {
+      console.error("Roblox Game Icons Error:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ error: error.message });
+    }
+  });
+
+  // Get universe details (Experience info) - Often more reliable than place details
+  app.get("/api/roblox/universes/details", async (req, res) => {
+    const { universeIds } = req.query;
+    if (!universeIds) return res.status(400).json({ error: "universeIds are required" });
+
+    try {
+      const response = await axios.get(`https://games.roblox.com/v1/games?universeIds=${universeIds}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      res.json(response.data);
+    } catch (error: any) {
+      console.error("Roblox Universe Details Error:", error.response?.data || error.message);
       res.status(error.response?.status || 500).json({ 
         error: error.response?.data?.errors?.[0]?.message || error.message 
       });

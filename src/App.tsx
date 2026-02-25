@@ -17,11 +17,16 @@ import {
   ShieldCheck,
   LayoutDashboard,
   Languages,
-  Clock
+  Clock,
+  Link as LinkIcon,
+  Edit2,
+  Check,
+  X,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
-import { UserStatus, RobloxUser, RobloxPresence, RobloxThumbnail } from './types';
+import { UserStatus, RobloxUser, RobloxPresence, RobloxThumbnail, RobloxPlaceDetails, RobloxUniverseDetails } from './types';
 
 const STORAGE_KEY = 'jiramet_check_users';
 const LANG_KEY = 'jiramet_check_lang';
@@ -60,13 +65,16 @@ const translations = {
     minutesAgo: 'm ago',
     hoursAgo: 'h ago',
     daysAgo: 'd ago',
-    recentActivity: 'Recent Activity',
-    live: 'Live',
-    joined: 'joined',
-    left: 'left',
-    startedPlaying: 'started playing',
-    wentOffline: 'went offline',
-    wentOnline: 'went online'
+    mapName: 'Map Name',
+    gameId: 'Game ID',
+    lastSeen: 'Last Seen',
+    at: 'at',
+    customGame: 'Custom Game Link/ID',
+    setCustom: 'Set Custom',
+    reset: 'Reset',
+    enterGameRef: 'Enter Game URL or Place ID',
+    save: 'Save',
+    cancel: 'Cancel'
   },
   th: {
     title: 'Jiramet',
@@ -99,13 +107,16 @@ const translations = {
     minutesAgo: 'นาทีที่แล้ว',
     hoursAgo: 'ชั่วโมงที่แล้ว',
     daysAgo: 'วันที่แล้ว',
-    recentActivity: 'กิจกรรมล่าสุด',
-    live: 'สด',
-    joined: 'เข้าร่วม',
-    left: 'ออกจาก',
-    startedPlaying: 'เริ่มเล่น',
-    wentOffline: 'ออฟไลน์',
-    wentOnline: 'ออนไลน์'
+    mapName: 'ชื่อแมพ',
+    gameId: 'ไอดีเกม',
+    lastSeen: 'เห็นล่าสุดเมื่อ',
+    at: 'เวลา',
+    customGame: 'ลิงก์เกม/ไอดีแบบกำหนดเอง',
+    setCustom: 'ตั้งค่ากำหนดเอง',
+    reset: 'รีเซ็ต',
+    enterGameRef: 'ใส่ลิงก์เกมหรือไอดีแมพ',
+    save: 'บันทึก',
+    cancel: 'ยกเลิก'
   }
 };
 
@@ -125,6 +136,27 @@ const formatRelativeTime = (dateStr: string | undefined, lang: Language) => {
   
   const diffInDays = Math.floor(diffInHours / 24);
   return `${diffInDays}${lang === 'en' ? translations[lang].daysAgo : ' ' + translations[lang].daysAgo}`;
+};
+
+const GameIcon = ({ src, className, fallbackIcon: Fallback = Gamepad2 }: { src?: string, className?: string, fallbackIcon?: any }) => {
+  const [error, setError] = useState(false);
+  
+  if (!src || error) {
+    return (
+      <div className={`${className} bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-700`}>
+        <Fallback className="w-1/2 h-1/2" />
+      </div>
+    );
+  }
+
+  return (
+    <img 
+      src={src} 
+      alt="Game Icon"
+      onError={() => setError(true)}
+      className={`${className} object-cover bg-zinc-900 border border-zinc-800`}
+    />
+  );
 };
 
 const UserCardSkeleton = () => (
@@ -156,8 +188,8 @@ export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [gameNames, setGameNames] = useState<Record<number, string>>({});
+  const [editingCustomGame, setEditingCustomGame] = useState<number | null>(null);
+  const [customGameInput, setCustomGameInput] = useState('');
   const [, setTick] = useState(0);
 
   const t = translations[lang];
@@ -177,9 +209,8 @@ export default function App() {
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
       switch (data.type) {
-        case 'SYNC_DATA':
+        case 'SYNC_USERS':
           setUsers(data.users);
-          setHistory(data.history);
           if (isInitialLoading) {
             refreshAllStatus(data.users).finally(() => {
               setTimeout(() => setIsInitialLoading(false), 1500);
@@ -197,9 +228,6 @@ export default function App() {
           break;
         case 'USER_UPDATED':
           setUsers(prev => prev.map(u => u.id === data.user.id ? data.user : u));
-          break;
-        case 'HISTORY_UPDATED':
-          setHistory(data.history);
           break;
       }
     };
@@ -243,81 +271,105 @@ export default function App() {
     
     const userIds = currentUsers.map(u => u.id);
     const { presences, thumbnails } = await fetchPresenceAndThumbnails(userIds);
-    const now = new Date().toISOString();
-
-    // Fetch game names if needed
-    const placeIdsToFetch = presences
-      .filter(p => p.userPresenceType === 2 && p.placeId && !gameNames[p.placeId])
-      .map(p => p.placeId as number);
-
-    const currentNames = { ...gameNames };
-    if (placeIdsToFetch.length > 0) {
-      try {
-        const res = await axios.get(`/api/roblox/games/details?placeIds=${placeIdsToFetch.join(',')}`);
-        res.data.forEach((game: any) => {
-          currentNames[game.placeId] = game.name;
-        });
-        setGameNames(prev => ({ ...prev, ...currentNames }));
-      } catch (err) {
-        console.error("Failed to fetch game names", err);
-      }
-    }
     
-    setUsers(prev => {
-      const updated = prev.map(user => {
-        const presence = presences.find(p => p.userId === user.id);
-        const thumb = thumbnails.find(t => t.targetId === user.id);
-        
-        // Activity Logging Logic
-        if (presence) {
-          const oldPresence = user.presence;
-          let logMessage = '';
-          let logType = 'STATUS';
+    // Fetch place details for users in game or studio + custom game refs
+    const activePlaceIds = presences
+      .filter(p => (p.userPresenceType === 2 || p.userPresenceType === 3) && p.placeId)
+      .map(p => p.placeId as number);
+    
+    const customPlaceIds = currentUsers
+      .filter(u => u.customGameRef && !isNaN(Number(u.customGameRef)))
+      .map(u => Number(u.customGameRef));
+    
+    const placeIds = [...activePlaceIds, ...customPlaceIds];
+    
+    // Fetch universe details (Experience name) - Often more stable
+    const universeIds = presences
+      .filter(p => (p.userPresenceType === 2 || p.userPresenceType === 3) && p.universeId)
+      .map(p => p.universeId as number);
+    
+    let placeDetailsMap: Record<number, RobloxPlaceDetails> = {};
+    let universeDetailsMap: Record<number, RobloxUniverseDetails> = {};
+    let universeIconsMap: Record<number, string> = {};
 
-          if (oldPresence) {
-            // Offline -> Online
-            if (oldPresence.userPresenceType === 0 && presence.userPresenceType === 1) {
-              logMessage = `${user.displayName} ${t.wentOnline}`;
-            }
-            // Online/InGame -> Offline
-            else if (oldPresence.userPresenceType !== 0 && presence.userPresenceType === 0) {
-              logMessage = `${user.displayName} ${t.wentOffline}`;
-            }
-            // Joined Game
-            else if (oldPresence.userPresenceType !== 2 && presence.userPresenceType === 2) {
-              const gameName = currentNames[presence.placeId as number] || t.unknownExperience;
-              logMessage = `${user.displayName} ${t.startedPlaying} ${gameName}`;
-              logType = 'GAME';
-            }
-          }
-
-          if (logMessage) {
-            axios.post('/api/users/sync/log', {
-              log: {
-                type: logType,
-                message: logMessage,
-                timestamp: now,
-                userId: user.id,
-                thumbnail: thumb?.imageUrl
+    try {
+      const requests = [];
+      
+      if (placeIds.length > 0) {
+        const uniquePlaceIds = [...new Set(placeIds)];
+        requests.push(
+          axios.get(`/api/roblox/places/details?placeIds=${uniquePlaceIds.join(',')}`)
+            .then(res => {
+              if (Array.isArray(res.data)) {
+                res.data.forEach((detail: any) => {
+                  placeDetailsMap[detail.placeId] = detail;
+                });
               }
-            });
-          }
-        }
+            })
+            .catch(e => console.error("Place details fetch failed", e))
+        );
+      }
 
-        const updatedUser = {
-          ...user,
-          presence,
-          thumbnail: thumb?.imageUrl,
-          lastUpdated: now
-        };
-        
-        // Sync update to server
-        axios.post('/api/users/sync/update', { user: updatedUser });
-        
-        return updatedUser;
-      });
-      return updated;
-    });
+      if (universeIds.length > 0) {
+        const uniqueUniverseIds = [...new Set(universeIds)];
+        requests.push(
+          axios.get(`/api/roblox/universes/details?universeIds=${uniqueUniverseIds.join(',')}`)
+            .then(res => {
+              if (res.data && Array.isArray(res.data.data)) {
+                res.data.data.forEach((detail: any) => {
+                  universeDetailsMap[detail.id] = detail;
+                });
+              }
+            })
+            .catch(e => console.error("Universe details fetch failed", e))
+        );
+
+        requests.push(
+          axios.get(`/api/roblox/games/icons?universeIds=${uniqueUniverseIds.join(',')}`)
+            .then(res => {
+              if (res.data && Array.isArray(res.data.data)) {
+                res.data.data.forEach((icon: any) => {
+                  universeIconsMap[icon.targetId] = icon.imageUrl;
+                });
+              }
+            })
+            .catch(e => console.error("Universe icons fetch failed", e))
+        );
+      }
+
+      if (requests.length > 0) await Promise.all(requests);
+    } catch (err) {
+      console.error("Error fetching game details", err);
+    }
+
+    const now = new Date().toISOString();
+    
+    setUsers(prev => prev.map(user => {
+      const presence = presences.find(p => p.userId === user.id);
+      const thumb = thumbnails.find(t => t.targetId === user.id);
+      const placeDetails = presence?.placeId ? placeDetailsMap[presence.placeId] : undefined;
+      const universeDetails = presence?.universeId ? universeDetailsMap[presence.universeId] : undefined;
+      const universeIcon = presence?.universeId ? universeIconsMap[presence.universeId] : undefined;
+      const customPlaceDetails = user.customGameRef && !isNaN(Number(user.customGameRef)) 
+        ? placeDetailsMap[Number(user.customGameRef)] 
+        : undefined;
+
+      const updatedUser = {
+        ...user,
+        presence,
+        thumbnail: thumb?.imageUrl,
+        placeDetails,
+        universeDetails,
+        universeIcon,
+        customPlaceDetails,
+        lastUpdated: now
+      };
+      
+      // Sync update to server
+      axios.post('/api/users/sync/update', { user: updatedUser });
+      
+      return updatedUser;
+    }));
     
     setRefreshing(false);
   };
@@ -348,10 +400,47 @@ export default function App() {
         const now = new Date().toISOString();
         try {
           const { presences, thumbnails } = await fetchPresenceAndThumbnails([userToAdd.id]);
+          const presence = presences[0];
+          
+          let placeDetails = undefined;
+          let universeDetails = undefined;
+
+          if ((presence?.userPresenceType === 2 || presence?.userPresenceType === 3)) {
+            const requests = [];
+            
+            if (presence.placeId) {
+              requests.push(
+                axios.get(`/api/roblox/places/details?placeIds=${presence.placeId}`)
+                  .then(res => {
+                    if (Array.isArray(res.data) && res.data.length > 0) {
+                      placeDetails = res.data[0];
+                    }
+                  })
+                  .catch(e => console.error("Place details fetch failed", e))
+              );
+            }
+
+            if (presence.universeId) {
+              requests.push(
+                axios.get(`/api/roblox/universes/details?universeIds=${presence.universeId}`)
+                  .then(res => {
+                    if (res.data && Array.isArray(res.data.data) && res.data.data.length > 0) {
+                      universeDetails = res.data.data[0];
+                    }
+                  })
+                  .catch(e => console.error("Universe details fetch failed", e))
+              );
+            }
+
+            if (requests.length > 0) await Promise.all(requests);
+          }
+
           const newUser: UserStatus = {
             ...userToAdd,
-            presence: presences[0],
+            presence,
             thumbnail: thumbnails[0]?.imageUrl,
+            placeDetails,
+            universeDetails,
             lastUpdated: now
           };
           
@@ -392,6 +481,51 @@ export default function App() {
     }
   };
 
+  const saveCustomGame = async (userId: number) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+
+    let finalRef = customGameInput.trim();
+    // Support link or ID
+    const match = finalRef.match(/roblox\.com\/games\/(\d+)/);
+    if (match) {
+      finalRef = match[1];
+    }
+
+    let customPlaceDetails = undefined;
+    if (finalRef && !isNaN(Number(finalRef))) {
+      try {
+        const res = await axios.get(`/api/roblox/places/details?placeIds=${finalRef}`);
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          customPlaceDetails = res.data[0];
+        }
+      } catch (e) {
+        console.error("Failed to fetch custom place details", e);
+      }
+    }
+
+    const updatedUser = { ...user, customGameRef: finalRef, customPlaceDetails };
+    try {
+      await axios.post('/api/users/sync/update', { user: updatedUser });
+      setEditingCustomGame(null);
+      setCustomGameInput('');
+    } catch (err) {
+      console.error("Failed to update custom game ref", err);
+    }
+  };
+
+  const resetCustomGame = async (userId: number) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+
+    const updatedUser = { ...user, customGameRef: undefined, customPlaceDetails: undefined };
+    try {
+      await axios.post('/api/users/sync/update', { user: updatedUser });
+    } catch (err) {
+      console.error("Failed to reset custom game ref", err);
+    }
+  };
+
   const getStatusColor = (type?: number) => {
     switch (type) {
       case 1: return 'text-green-500'; // Online
@@ -425,10 +559,22 @@ export default function App() {
     offline: users.filter(u => !u.presence?.userPresenceType || u.presence.userPresenceType === 0).length
   };
 
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(filterQuery.toLowerCase()) || 
-    u.displayName.toLowerCase().includes(filterQuery.toLowerCase())
-  );
+  const filteredUsers = [...users]
+    .filter(u => 
+      u.name.toLowerCase().includes(filterQuery.toLowerCase()) || 
+      u.displayName.toLowerCase().includes(filterQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      const getPriority = (type?: number) => {
+        switch (type) {
+          case 2: return 3; // InGame
+          case 3: return 2; // InStudio
+          case 1: return 1; // Online
+          default: return 0; // Offline
+        }
+      };
+      return getPriority(b.presence?.userPresenceType) - getPriority(a.presence?.userPresenceType);
+    });
 
   return (
     <div className="min-h-screen bg-[#050505] font-sans selection:bg-red-500/30">
@@ -598,81 +744,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* Activity History */}
-        <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-6 mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-600/10 rounded-xl">
-                <Activity className="w-5 h-5 text-red-500" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-white tracking-tight">{t.recentActivity}</h3>
-                <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest mt-0.5">Real-time presence updates</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20">
-              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-              <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">{t.live}</span>
-            </div>
-          </div>
-
-          <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
-            <AnimatePresence mode="popLayout">
-              {history.map((log) => (
-                <motion.div
-                  key={log.id}
-                  initial={{ x: -20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  exit={{ scale: 0.95, opacity: 0 }}
-                  className="group flex items-center gap-4 p-3 bg-zinc-900/40 border border-zinc-800/30 rounded-2xl hover:border-zinc-700/50 transition-all"
-                >
-                  <div className="relative flex-shrink-0">
-                    {log.thumbnail ? (
-                      <img 
-                        src={log.thumbnail} 
-                        alt="" 
-                        className="w-10 h-10 rounded-xl object-cover border border-zinc-800"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center">
-                        <Activity className="w-5 h-5 text-zinc-600" />
-                      </div>
-                    )}
-                    {log.type === 'GAME' && (
-                      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-zinc-900 flex items-center justify-center">
-                        <Gamepad2 className="w-2 h-2 text-white" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-300 font-medium truncate leading-tight">
-                      {log.message}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Clock className="w-3 h-3 text-zinc-600" />
-                      <span className="text-[10px] text-zinc-600 font-mono uppercase">
-                        {formatRelativeTime(log.timestamp, lang)}
-                      </span>
-                    </div>
-                  </div>
-                  {log.type === 'GAME' && (
-                    <div className="px-2 py-1 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                      <span className="text-[10px] font-bold text-blue-500 uppercase tracking-tighter">New</span>
-                    </div>
-                  )}
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            {history.length === 0 && (
-              <div className="py-12 text-center">
-                <Activity className="w-8 h-8 text-zinc-800 mx-auto mb-3 opacity-20" />
-                <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest">No activity yet</p>
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Users Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <AnimatePresence mode="popLayout">
@@ -747,22 +818,145 @@ export default function App() {
                         <motion.div 
                           initial={{ opacity: 0, y: 5 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="p-3 bg-blue-600/10 border border-blue-600/20 rounded-xl"
+                          className="p-3 bg-blue-600/10 border border-blue-600/20 rounded-xl space-y-3"
                         >
-                          <div className="flex items-center gap-2 mb-1">
-                            <Gamepad2 className="w-3.5 h-3.5 text-blue-500" />
-                            <span className="text-[10px] font-mono uppercase tracking-widest text-blue-400">{t.currentlyPlaying}</span>
+                          <div className="flex items-start gap-3">
+                            <div className="relative flex-shrink-0">
+                              <GameIcon 
+                                src={user.universeIcon || `https://www.roblox.com/asset-thumbnail/image?assetId=${user.presence.placeId}&width=150&height=150&format=png`}
+                                className="w-14 h-14 rounded-lg shadow-lg shadow-blue-500/10 border-blue-500/30"
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <Gamepad2 className="w-3 h-3 text-blue-500" />
+                                <span className="text-[9px] font-mono uppercase tracking-widest text-blue-400/80">{t.currentlyPlaying}</span>
+                              </div>
+                              <h5 className="text-sm font-bold text-white leading-tight mb-0.5 line-clamp-2">
+                                {user.universeDetails?.name || user.placeDetails?.name || user.presence.lastLocation || t.unknownExperience}
+                              </h5>
+                              {(user.universeDetails?.creator || user.placeDetails?.builder) && (
+                                <p className="text-[10px] text-blue-300/70 font-medium truncate">
+                                  by {user.universeDetails?.creator?.name || user.placeDetails?.builder}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-sm font-medium text-blue-100 line-clamp-1">
-                            {gameNames[user.presence.placeId as number] || user.presence.lastLocation || t.unknownExperience}
-                          </p>
+                          
+                          {(user.placeDetails || user.universeDetails) && (
+                            <div className="pt-2 border-t border-blue-600/10 space-y-1">
+                              {user.placeDetails && user.placeDetails.name !== (user.universeDetails?.name) && (
+                                <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-blue-400/70">
+                                  <span>{t.mapName}</span>
+                                  <span className="text-blue-300 text-right line-clamp-1 ml-4">{user.placeDetails.name}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-blue-400/70">
+                                <span>{t.gameId}</span>
+                                <span className="text-blue-300">{user.presence.placeId}</span>
+                              </div>
+                              {user.presence.universeId && (
+                                <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-blue-400/70">
+                                  <span>Universe ID</span>
+                                  <span className="text-blue-300">{user.presence.universeId}</span>
+                                </div>
+                              )}
+                              {user.presence.rootPlaceId && (
+                                <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-blue-400/70">
+                                  <span>Root Place ID</span>
+                                  <span className="text-blue-300">{user.presence.rootPlaceId}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </motion.div>
                       )}
 
+                      {/* Custom Game Link Section */}
+                      <div className="p-3 bg-zinc-900/40 rounded-xl border border-zinc-800/50">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <LinkIcon className="w-3 h-3 text-zinc-500" />
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">{t.customGame}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {user.customGameRef && (
+                              <button 
+                                onClick={() => resetCustomGame(user.id)}
+                                className="p-1 text-zinc-600 hover:text-red-500 transition-colors"
+                                title={t.reset}
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => {
+                                setEditingCustomGame(user.id);
+                                setCustomGameInput(user.customGameRef || '');
+                              }}
+                              className="p-1 text-zinc-600 hover:text-blue-500 transition-colors"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {editingCustomGame === user.id ? (
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="text"
+                              value={customGameInput}
+                              onChange={(e) => setCustomGameInput(e.target.value)}
+                              placeholder={t.enterGameRef}
+                              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-[10px] focus:outline-none focus:border-blue-500"
+                              autoFocus
+                            />
+                            <button onClick={() => saveCustomGame(user.id)} className="p-1 text-green-500 hover:bg-green-500/10 rounded">
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => setEditingCustomGame(null)} className="p-1 text-red-500 hover:bg-red-500/10 rounded">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] font-mono text-zinc-500">
+                            {user.customGameRef ? (
+                              <div className="flex items-center gap-3">
+                                <GameIcon 
+                                  src={`https://www.roblox.com/asset-thumbnail/image?assetId=${user.customGameRef}&width=150&height=150&format=png`}
+                                  className="w-8 h-8 rounded-md flex-shrink-0"
+                                  fallbackIcon={LinkIcon}
+                                />
+                                <div className="flex flex-col gap-0.5 min-w-0">
+                                  {user.customPlaceDetails?.name && (
+                                    <span className="text-blue-300 font-bold truncate">{user.customPlaceDetails.name}</span>
+                                  )}
+                                  <a 
+                                    href={user.customGameRef.startsWith('http') ? user.customGameRef : `https://www.roblox.com/games/${user.customGameRef}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-400 hover:underline flex items-center gap-1 truncate"
+                                  >
+                                    {user.customGameRef} <ExternalLink className="w-2 h-2" />
+                                  </a>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="italic opacity-50">Not set</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
                       {(!user.presence?.userPresenceType || user.presence.userPresenceType === 0) && user.presence?.lastOnline && (
-                        <div className="flex items-center gap-2 px-1 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
-                          <Clock className="w-3 h-3" />
-                          {t.offlineSince} {formatRelativeTime(user.presence.lastOnline, lang)}
+                        <div className="flex flex-col gap-1 px-1">
+                          <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                            <Clock className="w-3 h-3" />
+                            {t.offlineSince} {formatRelativeTime(user.presence.lastOnline, lang)}
+                          </div>
+                          <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest pl-5">
+                            {t.lastSeen} {t.at} {new Date(user.presence.lastOnline).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
                         </div>
                       )}
 
