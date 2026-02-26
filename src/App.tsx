@@ -792,7 +792,7 @@ export default function App() {
               className="relative w-full h-full flex items-center justify-center p-12"
             >
               <img 
-                src="https://cdn.discordapp.com/attachments/1408452728388325511/1475859003270762609/BackgroundEraser_20260224_211304647.png?ex=699f044e&is=699db2ce&hm=a1ce927d6348022cf51198dbae609dcb034f5e6d56b111543515894a892016e2&" 
+                src="https://cdn.discordapp.com/attachments/1408452728388325511/1476485393233875115/BackgroundEraser_20260226_144530974.png?ex=69a14bad&is=699ffa2d&hm=2b8e9500c9b9e61251096a9f1b0ce9c1a1b4c4188c6c1efa904b5d57cf76c931&" 
                 alt="Loading..."
                 className="w-full max-w-lg h-auto object-contain opacity-100"
                 referrerPolicy="no-referrer"
