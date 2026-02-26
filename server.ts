@@ -3,6 +3,15 @@ import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
+import fs from "fs";
+import path from "path";
+
+const DATA_FILE = path.join(process.cwd(), "data", "users.json");
+
+// Ensure data directory exists
+if (!fs.existsSync(path.join(process.cwd(), "data"))) {
+  fs.mkdirSync(path.join(process.cwd(), "data"));
+}
 
 async function startServer() {
   const app = express();
@@ -15,6 +24,25 @@ async function startServer() {
   // Shared state: list of tracked users
   let trackedUsers: any[] = [];
 
+  // Load initial state from file
+  if (fs.existsSync(DATA_FILE)) {
+    try {
+      const data = fs.readFileSync(DATA_FILE, "utf8");
+      trackedUsers = JSON.parse(data);
+      console.log(`[Storage] Loaded ${trackedUsers.length} users from disk`);
+    } catch (err) {
+      console.error("[Storage] Failed to load users:", err);
+    }
+  }
+
+  const saveToDisk = () => {
+    try {
+      fs.writeFileSync(DATA_FILE, JSON.stringify(trackedUsers, null, 2));
+    } catch (err) {
+      console.error("[Storage] Failed to save users:", err);
+    }
+  };
+
   // API to add/remove users for global sync
   app.post("/api/users/sync/add", (req, res) => {
     const { user } = req.body;
@@ -23,6 +51,7 @@ async function startServer() {
     // Check if already exists
     if (!trackedUsers.find(u => u.id === user.id)) {
       trackedUsers.push(user);
+      saveToDisk();
       broadcast({ type: "USER_ADDED", user });
     }
     res.json({ success: true });
@@ -33,6 +62,7 @@ async function startServer() {
     if (!userId) return res.status(400).json({ error: "UserId is required" });
     
     trackedUsers = trackedUsers.filter(u => u.id !== userId);
+    saveToDisk();
     broadcast({ type: "USER_REMOVED", userId });
     res.json({ success: true });
   });
@@ -42,6 +72,7 @@ async function startServer() {
     if (!user) return res.status(400).json({ error: "User is required" });
     
     trackedUsers = trackedUsers.map(u => u.id === user.id ? user : u);
+    saveToDisk();
     broadcast({ type: "USER_UPDATED", user });
     res.json({ success: true });
   });

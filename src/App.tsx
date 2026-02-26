@@ -34,6 +34,7 @@ import {
   useSpring 
 } from 'motion/react';
 import axios from 'axios';
+import { toast, Toaster } from 'sonner';
 import { UserStatus, RobloxUser, RobloxPresence, RobloxThumbnail, RobloxPlaceDetails, RobloxUniverseDetails } from './types';
 
 const STORAGE_KEY = 'jiramet_check_users';
@@ -84,7 +85,22 @@ const translations = {
     save: 'Save',
     cancel: 'Cancel',
     updateLog: 'Update Log',
+    userAdded: 'User added successfully',
+    userRemoved: 'User removed from monitor',
+    userUpdated: 'User settings updated',
+    errorAdding: 'Failed to add user',
+    errorRemoving: 'Failed to remove user',
+    errorUpdating: 'Failed to update user',
+    errorFetching: 'API Error: Failed to fetch data',
     updates: [
+      {
+        title: 'v1.6.0 - Persistence & Notifications',
+        items: [
+          'Added server-side data persistence (Data won\'t be lost on restart)',
+          'Added non-intrusive toast notifications for all actions',
+          'Improved error handling and reporting'
+        ]
+      },
       {
         title: 'v1.5.0 - Visual Overhaul',
         items: [
@@ -169,7 +185,22 @@ const translations = {
     save: 'บันทึก',
     cancel: 'ยกเลิก',
     updateLog: 'บันทึกการอัปเดต',
+    userAdded: 'เพิ่มผู้ใช้สำเร็จ',
+    userRemoved: 'ลบผู้ใช้ออกจากระบบแล้ว',
+    userUpdated: 'อัปเดตการตั้งค่าผู้ใช้แล้ว',
+    errorAdding: 'ไม่สามารถเพิ่มผู้ใช้ได้',
+    errorRemoving: 'ไม่สามารถลบผู้ใช้ได้',
+    errorUpdating: 'ไม่สามารถอัปเดตผู้ใช้ได้',
+    errorFetching: 'ข้อผิดพลาด API: ไม่สามารถดึงข้อมูลได้',
     updates: [
+      {
+        title: 'v1.6.0 - ระบบบันทึกข้อมูลและแจ้งเตือน',
+        items: [
+          'เพิ่มระบบบันทึกข้อมูลฝั่งเซิร์ฟเวอร์ (ข้อมูลไม่หายเมื่อรีสตาร์ท)',
+          'เพิ่มการแจ้งเตือนแบบ Toast สำหรับทุกการกระทำ',
+          'ปรับปรุงการจัดการข้อผิดพลาดและการรายงานผล'
+        ]
+      },
       {
         title: 'v1.5.0 - Visual Overhaul',
         items: [
@@ -602,6 +633,7 @@ export default function App() {
           
           // Sync to server
           await axios.post('/api/users/sync/add', { user: newUser });
+          toast.success(t.userAdded, { description: `@${newUser.name}` });
           
           setUsername('');
         } catch (fetchErr: any) {
@@ -611,17 +643,20 @@ export default function App() {
           
           // Sync to server
           await axios.post('/api/users/sync/add', { user: newUser });
+          toast.warning(t.userAdded, { description: t.fetchError });
           
           setUsername('');
           setError(t.fetchError);
         }
       } else {
         setError(t.userNotFound);
+        toast.error(t.errorAdding, { description: t.userNotFound });
       }
     } catch (err: any) {
       console.error("Search failed", err);
       const apiError = err.response?.data?.error || err.message || "Failed to connect to Roblox API";
       setError(`${t.searchError}: ${typeof apiError === 'object' ? JSON.stringify(apiError) : apiError}`);
+      toast.error(t.errorAdding, { description: typeof apiError === 'object' ? JSON.stringify(apiError) : apiError });
     } finally {
       setLoading(false);
       setSearchingUser(false);
@@ -632,8 +667,10 @@ export default function App() {
     try {
       await axios.post('/api/users/sync/remove', { userId: id });
       setDeleteConfirmId(null);
+      toast.info(t.userRemoved);
     } catch (err) {
       console.error("Failed to remove user", err);
+      toast.error(t.errorRemoving);
     }
   };
 
@@ -665,8 +702,10 @@ export default function App() {
       await axios.post('/api/users/sync/update', { user: updatedUser });
       setEditingCustomGame(null);
       setCustomGameInput('');
+      toast.success(t.userUpdated);
     } catch (err) {
       console.error("Failed to update custom game ref", err);
+      toast.error(t.errorUpdating);
     }
   };
 
@@ -677,8 +716,10 @@ export default function App() {
     const updatedUser = { ...user, customGameRef: undefined, customPlaceDetails: undefined };
     try {
       await axios.post('/api/users/sync/update', { user: updatedUser });
+      toast.info(t.userUpdated);
     } catch (err) {
       console.error("Failed to reset custom game ref", err);
+      toast.error(t.errorUpdating);
     }
   };
 
@@ -734,6 +775,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#050505] font-sans selection:bg-red-500/30">
+      <Toaster position="top-right" theme="dark" richColors closeButton />
       <AnimatePresence>
         {isInitialLoading && (
           <motion.div
