@@ -24,7 +24,13 @@ import {
   X,
   RotateCcw,
   History,
-  ChevronRight
+  ChevronRight,
+  ChevronLeft,
+  Trophy,
+  Map,
+  Zap,
+  Box,
+  BarChart3
 } from 'lucide-react';
 import { 
   motion, 
@@ -85,6 +91,27 @@ const translations = {
     save: 'Save',
     cancel: 'Cancel',
     updateLog: 'Update Log',
+    details: 'Details',
+    backToDashboard: 'Back to Dashboard',
+    matchInfo: 'Match Information',
+    latestMatches: 'Latest Matches',
+    totalWins: 'Total Wins',
+    currentMap: 'Current Map',
+    wave: 'Wave',
+    location: 'Location',
+    rewards: 'Rewards',
+    failed: 'FAILED',
+    success: 'SUCCESS',
+    victory: 'Victory',
+    defeat: 'Defeat',
+    currencies: 'Currencies',
+    duration: 'Duration',
+    level: 'Level',
+    bp: 'BP',
+    receivedItems: 'Received Items',
+    service: 'Service',
+    farmMode: 'Farm Mode',
+    progress: 'Progress',
     userAdded: 'User added successfully',
     userRemoved: 'User removed from monitor',
     userUpdated: 'User settings updated',
@@ -93,6 +120,14 @@ const translations = {
     errorUpdating: 'Failed to update user',
     errorFetching: 'API Error: Failed to fetch data',
     updates: [
+      {
+        title: 'v1.7.0 - User Detail View',
+        items: [
+          'Added detailed view for each user',
+          'Added match history and statistics simulation',
+          'Improved navigation with "Back to Dashboard" feature'
+        ]
+      },
       {
         title: 'v1.6.0 - Persistence & Notifications',
         items: [
@@ -185,6 +220,27 @@ const translations = {
     save: 'บันทึก',
     cancel: 'ยกเลิก',
     updateLog: 'บันทึกการอัปเดต',
+    details: 'รายละเอียด',
+    backToDashboard: 'กลับสู่แดชบอร์ด',
+    matchInfo: 'ข้อมูลการเล่น',
+    latestMatches: 'การเล่นล่าสุด',
+    totalWins: 'ชนะทั้งหมด',
+    currentMap: 'แมพปัจจุบัน',
+    wave: 'เวฟ',
+    location: 'ตำแหน่ง',
+    rewards: 'รางวัล',
+    failed: 'ล้มเหลว',
+    success: 'สำเร็จ',
+    victory: 'ชนะ',
+    defeat: 'แพ้',
+    currencies: 'สกุลเงิน',
+    duration: 'ระยะเวลา',
+    level: 'เลเวล',
+    bp: 'BP',
+    receivedItems: 'ไอเทมที่ได้รับ',
+    service: 'บริการ',
+    farmMode: 'โหมดฟาร์ม',
+    progress: 'ความคืบหน้า',
     userAdded: 'เพิ่มผู้ใช้สำเร็จ',
     userRemoved: 'ลบผู้ใช้ออกจากระบบแล้ว',
     userUpdated: 'อัปเดตการตั้งค่าผู้ใช้แล้ว',
@@ -193,6 +249,14 @@ const translations = {
     errorUpdating: 'ไม่สามารถอัปเดตผู้ใช้ได้',
     errorFetching: 'ข้อผิดพลาด API: ไม่สามารถดึงข้อมูลได้',
     updates: [
+      {
+        title: 'v1.7.0 - ระบบรายละเอียดผู้ใช้',
+        items: [
+          'เพิ่มหน้าแสดงรายละเอียดเชิงลึกสำหรับผู้เล่นแต่ละคน',
+          'เพิ่มระบบจำลองประวัติการเล่นและสถิติ',
+          'ปรับปรุงการนำทางด้วยปุ่ม "กลับสู่แดชบอร์ด"'
+        ]
+      },
       {
         title: 'v1.6.0 - ระบบบันทึกข้อมูลและแจ้งเตือน',
         items: [
@@ -363,6 +427,311 @@ const UserCardSkeleton = () => (
   </div>
 );
 
+const parseDiscordMessage = (msg: any, user: UserStatus, t: any, lang: Language) => {
+  if (!msg.embeds || msg.embeds.length === 0) return [];
+  
+  return msg.embeds.map((embed: any) => {
+    // Parse fields
+    const fields: Record<string, string> = {};
+    embed.fields?.forEach((f: any) => {
+      fields[f.name.toLowerCase()] = f.value;
+    });
+
+    // Filter by player name (Strictly match Roblox Username)
+    const playerName = fields['player']?.replace(/`/g, '').trim().toLowerCase();
+    if (playerName && playerName !== user.name.toLowerCase()) {
+      return null;
+    }
+
+    // Parse Rewards
+    const rewardsText = fields['rewards'] || '';
+    const rewards = rewardsText.split('\n').filter(line => line.startsWith('+')).map(line => {
+      const parts = line.substring(1).trim().split(' ');
+      const amount = parts[0];
+      const name = parts.slice(1).join(' ');
+      
+      let color = 'text-zinc-400';
+      if (name.toLowerCase().includes('gem')) color = 'text-blue-400';
+      if (name.toLowerCase().includes('gold')) color = 'text-yellow-500';
+      if (name.toLowerCase().includes('essence')) color = 'text-purple-400';
+      if (name.toLowerCase().includes('finger')) color = 'text-red-500';
+
+      return { name, amount: `x${amount}`, color };
+    });
+
+    // Parse Currencies
+    const currenciesText = fields['currencies'] || '';
+    const currencies = currenciesText.split('\n').map(line => {
+      const parts = line.split(':').map(s => s.trim());
+      if (parts.length < 2) return null;
+      return { name: parts[0], amount: parts[1] };
+    }).filter(Boolean);
+
+    return {
+      id: msg.id + (embed.title || ''),
+      title: embed.title,
+      status: fields['result']?.includes('Victory') ? t.victory : t.defeat,
+      isVictory: fields['result']?.includes('Victory'),
+      duration: fields['duration']?.replace(/`/g, '').trim(),
+      date: new Date(msg.timestamp).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US'),
+      timeOfDay: new Date(msg.timestamp).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit' }),
+      rewards,
+      currencies,
+      footer: embed.footer?.text
+    };
+  }).filter(Boolean);
+};
+
+const UserDetailView: React.FC<{ user: UserStatus, onBack: () => void, lang: Language }> = ({ user, onBack, lang }) => {
+  const t = translations[lang];
+  const [discordMatches, setDiscordMatches] = useState<any[]>([]);
+  const [loadingDiscord, setLoadingDiscord] = useState(false);
+
+  const fetchDiscordData = useCallback(async () => {
+    setLoadingDiscord(true);
+    try {
+      const res = await axios.get('/api/discord/messages');
+      const messages = res.data;
+      
+      const parsedMatches = messages.flatMap((msg: any) => parseDiscordMessage(msg, user, t, lang));
+      setDiscordMatches(parsedMatches);
+    } catch (err) {
+      console.error("Failed to fetch Discord data:", err);
+    } finally {
+      setLoadingDiscord(false);
+    }
+  }, [user.name, user.displayName, t.victory, t.defeat, lang]);
+
+  useEffect(() => {
+    fetchDiscordData();
+  }, [fetchDiscordData]);
+
+  // Real-time Discord Updates
+  useEffect(() => {
+    const handleNewMessage = (e: any) => {
+      const msg = e.detail;
+      const newMatches = parseDiscordMessage(msg, user, t, lang);
+      if (newMatches.length > 0) {
+        setDiscordMatches(prev => [...newMatches, ...prev]);
+        toast.success(t.latestMatches, { description: "New match data received!" });
+      }
+    };
+
+    window.addEventListener('discord-message', handleNewMessage);
+    return () => window.removeEventListener('discord-message', handleNewMessage);
+  }, [user.name, user.displayName, t.victory, t.defeat, lang]);
+
+  // Use discord matches if available, otherwise fallback to mock
+  const displayMatches = discordMatches.length > 0 ? discordMatches : [
+    { 
+      id: 1, 
+      status: t.victory, 
+      isVictory: true, 
+      duration: '1:44', 
+      date: '13/03/2026', 
+      timeOfDay: '10:56', 
+      rewards: [
+        { name: 'Gem', amount: 'x61', color: 'text-blue-400' }, 
+        { name: 'Gold', amount: 'x689', color: 'text-yellow-500' }, 
+        { name: 'Cursed Essence', amount: 'x7', color: 'text-purple-400' }
+      ],
+      currencies: [
+        { name: 'Gold', amount: '81992' },
+        { name: 'Gems', amount: '11495' }
+      ]
+    },
+    { 
+      id: 2, 
+      status: t.defeat, 
+      isVictory: false, 
+      duration: '0:52', 
+      date: '13/03/2026', 
+      timeOfDay: '10:14', 
+      rewards: [],
+      currencies: [
+        { name: 'Gold', amount: '81303' },
+        { name: 'Gems', amount: '11434' }
+      ]
+    },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      className="max-w-4xl mx-auto px-4 py-8"
+    >
+      {/* Header */}
+      <button 
+        onClick={onBack}
+        className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors mb-8 group"
+      >
+        <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+        <span className="text-xs font-mono uppercase tracking-widest">{t.backToDashboard}</span>
+      </button>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Left Column - User Info */}
+        <div className="lg:col-span-5 space-y-6">
+          <div className="glass p-8 rounded-3xl relative overflow-hidden group">
+             {/* Status Badge */}
+             <div className="absolute top-6 left-6 z-10">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 border border-blue-600/30 rounded-full">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">FARMING</span>
+                </div>
+             </div>
+
+             {/* Avatar */}
+             <div className="relative aspect-square mb-6 flex items-center justify-center">
+                <div className="absolute inset-0 bg-gradient-to-b from-red-600/5 to-transparent rounded-full blur-3xl" />
+                <img 
+                  src={user.thumbnail?.replace('150x150', '420x420') || `https://www.roblox.com/headshot-thumbnail/image?userId=${user.id}&width=420&height=420&format=png`} 
+                  alt={user.name}
+                  className="w-full h-full object-contain relative z-10 drop-shadow-[0_20px_50px_rgba(220,38,38,0.2)]"
+                />
+             </div>
+
+             <div className="text-center">
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <h2 className="text-3xl font-black tracking-tighter uppercase">{user.displayName}</h2>
+                  {user.hasVerifiedBadge && <ShieldCheck className="w-6 h-6 text-blue-500" />}
+                </div>
+                <div className="flex items-center justify-center gap-4 text-zinc-500 text-sm font-mono">
+                  <span className="flex items-center gap-1"><Activity className="w-3 h-3" /> PC-2:1</span>
+                  <span className="w-1 h-1 rounded-full bg-zinc-800" />
+                  <span className="text-green-500">1 minute ago</span>
+                </div>
+             </div>
+          </div>
+
+          {/* Received Items */}
+          <div className="glass p-4 rounded-2xl flex items-center justify-between group hover:border-green-500/30 transition-all">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-500/10 rounded-lg">
+                <Box className="w-5 h-5 text-green-500" />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">{t.receivedItems}</span>
+            </div>
+            <div className="px-2 py-0.5 bg-green-500/20 text-green-500 rounded text-[10px] font-bold">3</div>
+          </div>
+        </div>
+
+        {/* Right Column - Game & Match Info */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Game Info Card */}
+          <div className="glass p-6 rounded-3xl space-y-6">
+            <div className="grid grid-cols-1 gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Gamepad2 className="w-5 h-5 text-zinc-500" />
+                  <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">GAME</span>
+                </div>
+                <span className="text-sm font-bold text-white">{user.universeDetails?.name || user.placeDetails?.name || t.unknownExperience}</span>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest">
+                <span className="text-zinc-500">{t.progress}</span>
+                <span className="text-zinc-300">0 / 1 <span className="text-green-500">(0%)</span></span>
+              </div>
+              <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                <div className="h-full bg-green-500 w-[5%]" />
+              </div>
+            </div>
+          </div>
+
+          {/* Latest Matches */}
+          <div className="glass p-6 rounded-3xl space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <BarChart3 className="w-5 h-5 text-blue-500" />
+                <h3 className="text-lg font-bold uppercase tracking-tight">{t.latestMatches}</h3>
+              </div>
+              <button 
+                onClick={fetchDiscordData}
+                disabled={loadingDiscord}
+                className="p-1 text-zinc-600 hover:text-blue-500 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${loadingDiscord ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {displayMatches.map(match => (
+                <div key={match.id} className="p-5 bg-zinc-900/40 rounded-2xl border border-zinc-800/50 space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-800/50 pb-2">
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Match Result</span>
+                    <span className="text-[10px] font-mono text-zinc-600">{match.date} • {match.timeOfDay}</span>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Result */}
+                    <div>
+                      <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-2">Result</p>
+                      <div className="flex items-center gap-2">
+                        {match.isVictory ? (
+                          <Trophy className="w-4 h-4 text-yellow-500" />
+                        ) : (
+                          <X className="w-4 h-4 text-red-500" />
+                        )}
+                        <span className={`text-sm font-bold ${match.isVictory ? 'text-green-500' : 'text-red-500'} uppercase tracking-wider`}>
+                          {match.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Duration */}
+                    <div>
+                      <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-2">Duration</p>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-zinc-400" />
+                        <span className="text-sm font-bold text-white">{match.duration || match.time}</span>
+                      </div>
+                    </div>
+
+                    {/* Rewards */}
+                    {match.rewards && match.rewards.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-2">Rewards</p>
+                        <div className="space-y-1.5">
+                          {match.rewards.map((reward: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <span className={`text-xs font-bold ${reward.color}`}>+{reward.amount.replace('x', '')} {reward.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Currencies */}
+                    {match.currencies && match.currencies.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-2">Currencies</p>
+                        <div className="space-y-1.5">
+                          {match.currencies.map((curr: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-zinc-400">{curr.name}:</span>
+                              <span className="text-xs font-bold text-white">{curr.amount}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export default function App() {
   const [username, setUsername] = useState('');
   const [filterQuery, setFilterQuery] = useState('');
@@ -376,6 +745,7 @@ export default function App() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [showUpdateLog, setShowUpdateLog] = useState(false);
   const [editingCustomGame, setEditingCustomGame] = useState<number | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [customGameInput, setCustomGameInput] = useState('');
   const [, setTick] = useState(0);
 
@@ -415,6 +785,9 @@ export default function App() {
           break;
         case 'USER_UPDATED':
           setUsers(prev => prev.map(u => u.id === data.user.id ? data.user : u));
+          break;
+        case 'DISCORD_MESSAGE_NEW':
+          window.dispatchEvent(new CustomEvent('discord-message', { detail: data.message }));
           break;
       }
     };
@@ -807,6 +1180,7 @@ export default function App() {
             >
               <h2 className="text-2xl font-bold tracking-tighter uppercase text-white mb-2">
                 Jiramet<span className="text-red-600">Check</span>
+                <span className="ml-2 text-[10px] bg-red-600/20 text-red-500 border border-red-600/30 px-1.5 py-0.5 rounded uppercase tracking-tighter">Beta</span>
               </h2>
               <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.2em] mb-4">
                 Created by _.texraxit
@@ -828,8 +1202,23 @@ export default function App() {
       </div>
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-12">
-        {/* Header */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-12">
+        <AnimatePresence mode="wait">
+          {selectedUserId && users.find(u => u.id === selectedUserId) ? (
+            <UserDetailView 
+              key="detail"
+              user={users.find(u => u.id === selectedUserId)!} 
+              onBack={() => setSelectedUserId(null)} 
+              lang={lang}
+            />
+          ) : (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {/* Header */}
+              <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-12">
           <div>
             <motion.div 
               initial={{ opacity: 0, x: -20 }}
@@ -841,6 +1230,7 @@ export default function App() {
               </div>
               <h1 className="text-3xl font-bold tracking-tighter uppercase">
                 {t.title}<span className="text-red-600">Check</span>
+                <span className="ml-2 text-[10px] bg-red-600/20 text-red-500 border border-red-600/30 px-1.5 py-0.5 rounded uppercase tracking-tighter align-middle">Beta</span>
               </h1>
             </motion.div>
             <p className="text-zinc-500 text-sm font-mono uppercase tracking-widest">
@@ -1180,6 +1570,13 @@ export default function App() {
                         >
                           {t.profile} <ExternalLink className="w-3 h-3" />
                         </a>
+                        <button 
+                          onClick={() => setSelectedUserId(user.id)}
+                          className="flex-1 flex items-center justify-center gap-2 py-2 bg-red-600/10 hover:bg-red-600/20 border border-red-600/20 rounded-xl text-xs font-bold text-red-500 transition-all"
+                        >
+                          <BarChart3 className="w-3 h-3" />
+                          {t.details}
+                        </button>
                         <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest text-center">
                           {t.lastUpdated}: {user.lastUpdated ? new Date(user.lastUpdated).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
                         </div>
@@ -1204,7 +1601,10 @@ export default function App() {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+</div>
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
@@ -1302,7 +1702,7 @@ export default function App() {
 
               <div className="p-4 bg-zinc-900/50 border-t border-zinc-800 text-center">
                 <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.2em]">
-                  Current Version: v1.5.0
+                  Current Version: v1.7.0
                 </p>
               </div>
             </motion.div>

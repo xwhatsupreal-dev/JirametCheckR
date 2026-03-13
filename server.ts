@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import fs from "fs";
 import path from "path";
+import { Client, GatewayIntentBits, Embed } from 'discord.js';
 
 const DATA_FILE = path.join(process.cwd(), "data", "users.json");
 
@@ -94,6 +95,56 @@ async function startServer() {
       }
     });
   };
+
+  // Discord Real-time Listener
+  const discordToken = process.env.DISCORD_BOT_TOKEN;
+  const discordChannelId = process.env.DISCORD_CHANNEL_ID;
+
+  if (discordToken && discordChannelId) {
+    const discordClient = new Client({
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+      ]
+    });
+
+    discordClient.on('ready', () => {
+      console.log(`[Discord] Bot logged in as ${discordClient.user?.tag}`);
+    });
+
+    const handleDiscordMessage = (message: any) => {
+      if (message.channelId === discordChannelId) {
+        if (message.embeds && message.embeds.length > 0) {
+          console.log(`[Discord] Processing message with embeds: ${message.id}`);
+          broadcast({
+            type: "DISCORD_MESSAGE_NEW",
+            message: {
+              id: message.id,
+              content: message.content,
+              timestamp: message.createdAt ? message.createdAt.toISOString() : new Date().toISOString(),
+              embeds: message.embeds.map((embed: any) => ({
+                title: embed.title,
+                description: embed.description,
+                fields: embed.fields ? embed.fields.map((f: any) => ({ name: f.name, value: f.value })) : [],
+                footer: embed.footer ? { text: embed.footer.text } : null,
+                timestamp: embed.timestamp
+              }))
+            }
+          });
+        }
+      }
+    };
+
+    discordClient.on('messageCreate', handleDiscordMessage);
+    discordClient.on('messageUpdate', (oldMsg, newMsg) => handleDiscordMessage(newMsg));
+
+    discordClient.login(discordToken).catch(err => {
+      console.error("[Discord] Login failed:", err.message);
+    });
+  } else {
+    console.warn("[Discord] Bot token or Channel ID missing. Real-time updates disabled.");
+  }
 
   // Roblox API Proxy Routes
   
@@ -269,6 +320,31 @@ async function startServer() {
       console.error("Roblox Universe Details Error:", error.response?.data || error.message);
       res.status(error.response?.status || 500).json({ 
         error: error.response?.data?.errors?.[0]?.message || error.message 
+      });
+    }
+  });
+
+  // Discord API - Fetch messages from a channel
+  app.get("/api/discord/messages", async (req, res) => {
+    const token = process.env.DISCORD_BOT_TOKEN;
+    const channelId = process.env.DISCORD_CHANNEL_ID;
+
+    if (!token || !channelId) {
+      return res.status(500).json({ error: "Discord configuration missing (Token or Channel ID)" });
+    }
+
+    try {
+      const response = await axios.get(`https://discord.com/api/v10/channels/${channelId}/messages?limit=50`, {
+        headers: {
+          'Authorization': `Bot ${token}`,
+          'User-Agent': 'DiscordBot (https://github.com/discordjs/discord.js, 14.14.1)'
+        }
+      });
+      res.json(response.data);
+    } catch (error: any) {
+      console.error("Discord API Error:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.message || error.message 
       });
     }
   });
